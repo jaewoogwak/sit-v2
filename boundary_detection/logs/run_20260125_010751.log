@@ -1,0 +1,9 @@
+[run.sh] Log file: /dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/logs/run_20260125_010751.log
+[run.sh] Merged train/val JSONL: ./output/activitynet_trainval_merged.jsonl
+[run.sh] Inference JSONLs: /dev/hdd2/gjw/datasets/activitynet/activitynet_train.jsonl,/dev/hdd2/gjw/datasets/activitynet/activitynet_val.jsonl
+[run.sh] Inference outputs: ./output/boundaries_act_train.json,./output/boundaries_act_val.json
+[run.sh] Coarse mode: peaks (sim_threshold=0.65)
+[run.sh] Fine params: seq_len=3 feature_dim=512 batch_size=128 lr=1e-4 epochs=1 layers=2 heads=8 ff_dim=1024 use_local_max=0 alpha=3 threshold_std=1.0 segment_pooling=self_attn
+[run.sh] Level params: seq_len=3 batch_size=128 lr=1e-4 epochs=1 layers=2 heads=8 ff_dim=1024 use_local_max=0 alpha=2 threshold_std=0 threshold_mode=mad ckpt_dir=./checkpoints/level
+[run.sh] Recursive params: levels=5 until_one=1 seq_len=3 seq_len_list= alpha=2 alpha_list= a=0 a_list= checkpoint= use_local_max=0
+[run.sh] Mode: fine+recursive+coarse

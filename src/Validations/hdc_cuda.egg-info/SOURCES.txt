@@ -1,0 +1,7 @@
+hamming_cuda.cu
+hamming_wrapper.cpp
+setup.py
+hdc_cuda.egg-info/PKG-INFO
+hdc_cuda.egg-info/SOURCES.txt
+hdc_cuda.egg-info/dependency_links.txt
+hdc_cuda.egg-info/top_level.txt

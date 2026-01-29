@@ -1,0 +1,43 @@
+[run.sh] Log file: /dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/logs/run_20260124_224405.log
+[run.sh] Merged train/val JSONL: ./output/tvr_trainval_merged.jsonl
+[run.sh] Inference JSONLs: /dev/hdd2/gjw/datasets/activitynet/activitynet_train.jsonl,/dev/hdd2/gjw/datasets/activitynet/activitynet_val.jsonl
+[run.sh] Inference outputs: ./output/boundaries_act_train.json,./output/boundaries_act_val.json
+[run.sh] Coarse mode: peaks (sim_threshold=0.65)
+[run.sh] Fine params: seq_len=3 feature_dim=512 batch_size=128 lr=1e-4 epochs=20 layers=2 heads=8 ff_dim=1024 use_local_max=0 alpha=3 threshold_std=1.0 segment_pooling=self_attn
+[run.sh] Level params: seq_len=3 batch_size=128 lr=1e-4 epochs=20 layers=2 heads=8 ff_dim=1024 use_local_max=0 alpha=2 threshold_std=0 threshold_mode=mad ckpt_dir=./checkpoints/level
+[run.sh] Recursive params: levels=5 until_one=1 seq_len=3 seq_len_list= alpha=2 alpha_list= a=0 a_list= checkpoint= use_local_max=0
+[run.sh] Mode: fine+recursive+coarse
+Traceback (most recent call last):
+  File "/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/../temp/train.py", line 102, in <module>
+    main()
+  File "/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/../temp/train.py", line 72, in main
+    for batch in loader:
+  File "/home/tako/anaconda3/envs/fa/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 701, in __next__
+    data = self._next_data()
+  File "/home/tako/anaconda3/envs/fa/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 1465, in _next_data
+    return self._process_data(data)
+  File "/home/tako/anaconda3/envs/fa/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 1491, in _process_data
+    data.reraise()
+  File "/home/tako/anaconda3/envs/fa/lib/python3.10/site-packages/torch/_utils.py", line 715, in reraise
+    raise exception
+FileNotFoundError: Caught FileNotFoundError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/tako/anaconda3/envs/fa/lib/python3.10/site-packages/torch/utils/data/_utils/worker.py", line 351, in _worker_loop
+    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]
+  File "/home/tako/anaconda3/envs/fa/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 52, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/tako/anaconda3/envs/fa/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 52, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/dev/ssd1/gjw/prvr/semantic-transformer-v2/temp/dataset.py", line 98, in __getitem__
+    feats = np.asarray(self._get_h5()[vid])
+  File "/dev/ssd1/gjw/prvr/semantic-transformer-v2/temp/dataset.py", line 62, in _get_h5
+    self._h5 = h5py.File(self.h5_path, "r")
+  File "/home/tako/anaconda3/envs/fa/lib/python3.10/site-packages/h5py/_hl/files.py", line 564, in __init__
+    fid = make_fid(name, mode, userblock_size, fapl, fcpl, swmr=swmr)
+  File "/home/tako/anaconda3/envs/fa/lib/python3.10/site-packages/h5py/_hl/files.py", line 238, in make_fid
+    fid = h5f.open(name, flags, fapl=fapl)
+  File "h5py/_objects.pyx", line 56, in h5py._objects.with_phil.wrapper
+  File "h5py/_objects.pyx", line 57, in h5py._objects.with_phil.wrapper
+  File "h5py/h5f.pyx", line 102, in h5py.h5f.open
+FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '/dev/hdd2/gjw/datasets/activitynet/frame_embeds.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
+

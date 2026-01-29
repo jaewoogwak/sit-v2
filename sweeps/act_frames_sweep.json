@@ -1,0 +1,55 @@
+[
+  {
+    "exp_name": "baseline",
+    "n_epoch": 100,
+    "max_epoch": 3,
+    "deterministic": true,
+    "num_workers": 0,
+    "persistent_workers": false
+  },
+  {
+    "exp_name": "lr_3e-4",
+    "n_epoch": 100,
+    "max_epoch": 3,
+    "deterministic": true,
+    "num_workers": 0,
+    "persistent_workers": false,
+    "lr": 0.0003
+  },
+  {
+    "exp_name": "margin_0.2",
+    "n_epoch": 100,
+    "max_epoch": 3,
+    "deterministic": true,
+    "num_workers": 0,
+    "persistent_workers": false,
+    "margin": 0.2
+  },
+  {
+    "exp_name": "loss_factor_alt",
+    "n_epoch": 100,
+    "max_epoch": 3,
+    "deterministic": true,
+    "num_workers": 0,
+    "persistent_workers": false,
+    "loss_factor": [0.03, 0.05, 0.02, 0.0]
+  },
+  {
+    "exp_name": "hier_loss_0.01",
+    "n_epoch": 100,
+    "max_epoch": 3,
+    "deterministic": true,
+    "num_workers": 0,
+    "persistent_workers": false,
+    "loss_factor": [0.02, 0.04, 0.015, 0.01]
+  },
+  {
+    "exp_name": "neg_factor_alt",
+    "n_epoch": 100,
+    "max_epoch": 3,
+    "deterministic": true,
+    "num_workers": 0,
+    "persistent_workers": false,
+    "neg_factor": [0.3, 48]
+  }
+]

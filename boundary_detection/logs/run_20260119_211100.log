@@ -1,0 +1,8 @@
+[run.sh] Log file: /dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/logs/run_20260119_211100.log
+[run.sh] Merged train/val JSONL: ./output/tvr_trainval_merged.jsonl
+[run.sh] Inference JSONLs: /dev/ssd1/gjw/prvr/dataset/tvr/TextData/tvr_train_release.jsonl,/dev/ssd1/gjw/prvr/dataset/tvr/TextData/tvr_val_release.jsonl
+[run.sh] Inference outputs: ./output/boundaries_train.json,./output/boundaries_val.json
+[run.sh] Coarse mode: peaks (sim_threshold=0.65)
+[run.sh] Fine params: seq_len=3 feature_dim=512 batch_size=128 lr=1e-4 epochs=20 layers=2 heads=8 ff_dim=1024 use_local_max=0 alpha=3 threshold_std=1.0
+[run.sh] Coarse params: seq_len=3 batch_size=128 lr=1e-4 epochs=20 layers=2 heads=8 ff_dim=1024 use_local_max=0 alpha=2 threshold_std=3.0 threshold_mode=mad
+epoch 1 loss 0.001065 time 15.85s

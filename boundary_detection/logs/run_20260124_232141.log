@@ -1,0 +1,30 @@
+[run.sh] Log file: /dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/logs/run_20260124_232141.log
+[run.sh] Merged train/val JSONL: ./output/activitynet_trainval_merged.jsonl
+[run.sh] Inference JSONLs: /dev/hdd2/gjw/datasets/activitynet/activitynet_train.jsonl,/dev/hdd2/gjw/datasets/activitynet/activitynet_val.jsonl
+[run.sh] Inference outputs: ./output/boundaries_act_train.json,./output/boundaries_act_val.json
+[run.sh] Coarse mode: peaks (sim_threshold=0.65)
+[run.sh] Fine params: seq_len=3 feature_dim=512 batch_size=128 lr=1e-4 epochs=20 layers=2 heads=8 ff_dim=1024 use_local_max=0 alpha=3 threshold_std=1.0 segment_pooling=self_attn
+[run.sh] Level params: seq_len=3 batch_size=128 lr=1e-4 epochs=20 layers=2 heads=8 ff_dim=1024 use_local_max=0 alpha=2 threshold_std=0 threshold_mode=mad ckpt_dir=./checkpoints/level
+[run.sh] Recursive params: levels=5 until_one=1 seq_len=3 seq_len_list= alpha=2 alpha_list= a=0 a_list= checkpoint= use_local_max=0
+[run.sh] Mode: fine+recursive+coarse
+epoch 1 loss 0.001656 time 29.54s
+epoch 2 loss 0.000902 time 29.57s
+epoch 3 loss 0.000779 time 29.49s
+epoch 4 loss 0.000700 time 29.48s
+epoch 5 loss 0.000643 time 29.69s
+epoch 6 loss 0.000600 time 29.56s
+epoch 7 loss 0.000566 time 29.57s
+epoch 8 loss 0.000538 time 29.62s
+epoch 9 loss 0.000517 time 29.55s
+epoch 10 loss 0.000500 time 29.59s
+epoch 11 loss 0.000485 time 29.58s
+epoch 12 loss 0.000473 time 29.59s
+epoch 13 loss 0.000462 time 29.54s
+epoch 14 loss 0.000452 time 29.50s
+epoch 15 loss 0.000443 time 29.49s
+epoch 16 loss 0.000436 time 29.54s
+epoch 17 loss 0.000429 time 29.58s
+epoch 18 loss 0.000423 time 29.65s
+epoch 19 loss 0.000417 time 29.50s
+epoch 20 loss 0.000412 time 29.55s
+./run.sh: line 347: unexpected EOF while looking for matching `"'

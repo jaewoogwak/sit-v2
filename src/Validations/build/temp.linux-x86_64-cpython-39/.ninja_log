@@ -1,0 +1,3 @@
+# ninja log v6
+0	11318	1753777999343080071	/disk/gjw/GMMFormer/src/Validations/build/temp.linux-x86_64-cpython-39/hamming_wrapper.o	c9f9a074d211819f
+0	38838	1753777999343080071	/disk/gjw/GMMFormer/src/Validations/build/temp.linux-x86_64-cpython-39/hamming_cuda.o	79086e580bebefc0
