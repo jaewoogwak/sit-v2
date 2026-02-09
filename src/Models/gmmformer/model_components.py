@@ -204,6 +204,160 @@ class LinearLayer(nn.Module):
         return x  # (N, L, D)
 
 
+class SegmentQueryTokenSelector(nn.Module):
+    """Slot-based token selector for segment-branch late interaction."""
+    def __init__(self, config):
+        super(SegmentQueryTokenSelector, self).__init__()
+        self.hidden_size = int(config.hidden_size)
+        self.num_slots = int(getattr(config, "seg_token_K", 8))
+        self.use_proj = bool(getattr(config, "seg_token_proj", True))
+        self.temperature = float(getattr(config, "seg_slot_temp", 0.07))
+        self.slot_dropout = nn.Dropout(float(getattr(config, "seg_slot_dropout", 0.0)))
+        self.infer_hard_topk = bool(getattr(config, "seg_infer_hard_topk", True))
+        self.diversity_type = str(getattr(config, "seg_diversity_type", "cosine")).lower()
+        self.diversity_margin = float(getattr(config, "seg_diversity_margin", 0.2))
+        self.debug_mask_print = bool(getattr(config, "seg_debug_mask_print", False))
+        self.debug_mask_every = int(getattr(config, "seg_debug_mask_every", 20))
+        self.debug_mask_max_print = int(getattr(config, "seg_debug_mask_max_print", 30))
+        self._debug_step = 0
+        self._debug_printed = 0
+        infer_topk = int(getattr(config, "seg_infer_topk", self.num_slots))
+        self.infer_topk = infer_topk if infer_topk > 0 else self.num_slots
+
+        if self.use_proj:
+            self.token_proj = nn.Sequential(
+                nn.LayerNorm(self.hidden_size),
+                nn.Dropout(float(getattr(config, "seg_slot_dropout", 0.0))),
+                nn.Linear(self.hidden_size, self.hidden_size),
+                nn.GELU(),
+            )
+        else:
+            self.token_proj = nn.Identity()
+
+        self.num_attn_layers = int(getattr(config, "seg_token_bertattn_layers", 1))
+        self.context_layers = nn.ModuleList()
+        if self.num_attn_layers > 0:
+            attn_cfg = type("AttnCfg", (), {})()
+            attn_cfg.hidden_size = self.hidden_size
+            attn_cfg.intermediate_size = self.hidden_size
+            attn_cfg.hidden_dropout_prob = float(getattr(config, "drop", 0.1))
+            attn_cfg.num_attention_heads = int(getattr(config, "n_heads", 4))
+            attn_cfg.attention_probs_dropout_prob = float(getattr(config, "drop", 0.1))
+            for _ in range(self.num_attn_layers):
+                self.context_layers.append(BertAttention(attn_cfg, wid=None))
+
+        self.slot_queries = nn.Parameter(torch.empty(self.num_slots, self.hidden_size))
+        self.token_key = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.normal_(self.slot_queries, mean=0.0, std=0.02)
+        if isinstance(self.token_proj, nn.Sequential):
+            for module in self.token_proj:
+                if isinstance(module, nn.Linear):
+                    nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                    if module.bias is not None:
+                        module.bias.data.zero_()
+        nn.init.normal_(self.token_key.weight, mean=0.0, std=0.02)
+
+    def _build_token_score(self, logits, token_mask):
+        masked_logits = logits.masked_fill(token_mask.unsqueeze(1) <= 0, -1e10)
+        token_score = masked_logits.max(dim=1).values
+        return token_score
+
+    def _hard_select(self, token_feats, token_score, token_mask):
+        bsz, seq_len, hsz = token_feats.shape
+        k = min(self.infer_topk, seq_len)
+        if k <= 0:
+            k = min(self.num_slots, seq_len)
+
+        masked_score = token_score.masked_fill(token_mask <= 0, -1e10)
+        topk_idx = torch.topk(masked_score, k=k, dim=-1).indices
+        gather_idx = topk_idx.unsqueeze(-1).expand(-1, -1, hsz)
+        selected = torch.gather(token_feats, dim=1, index=gather_idx)
+
+        if selected.size(1) < self.num_slots:
+            pad = torch.zeros(
+                (bsz, self.num_slots - selected.size(1), hsz),
+                device=selected.device,
+                dtype=selected.dtype,
+            )
+            selected = torch.cat([selected, pad], dim=1)
+        elif selected.size(1) > self.num_slots:
+            selected = selected[:, :self.num_slots, :]
+        return selected
+
+    def forward(self, token_feats, token_mask):
+        self._debug_step += 1
+        token_mask = token_mask.to(token_feats.device).float()
+        token_nonzero = (token_feats.abs().sum(dim=-1) > 0).float()
+        token_feats = self.token_proj(token_feats)
+        attn_mask = token_mask.unsqueeze(1)  # (B, 1, L) to match BertSelfAttention masking path
+        for layer in self.context_layers:
+            token_feats = layer(token_feats, attn_mask)
+
+        token_keys = self.token_key(token_feats)
+        slot_q = self.slot_queries.unsqueeze(0).expand(token_feats.size(0), -1, -1)
+        logits = torch.einsum("bkd,bld->bkl", slot_q, token_keys) / max(self.temperature, 1e-6)
+        token_score = self._build_token_score(logits, token_mask)
+
+        if (not self.training) and self.infer_hard_topk:
+            slot_feats = self._hard_select(token_feats, token_score, token_mask)
+            attn_weights = None
+        else:
+            logits = logits.masked_fill(token_mask.unsqueeze(1) <= 0, -1e10)
+            attn_weights = F.softmax(logits, dim=-1)
+            slot_feats = torch.einsum("bkl,bld->bkd", attn_weights, token_feats)
+            slot_feats = self.slot_dropout(slot_feats)
+
+        if self.debug_mask_print and self._debug_printed < self.debug_mask_max_print:
+            every = max(1, self.debug_mask_every)
+            if self._debug_step % every == 0:
+                with torch.no_grad():
+                    show_n = min(2, token_mask.size(0))
+                    valid_count = token_mask.sum(dim=-1)
+                    nonzero_count = token_nonzero.sum(dim=-1)
+                    token_norm = token_feats.norm(dim=-1)
+                    last_k = min(8, token_mask.size(1))
+                    head_norm = token_norm[:, :last_k].mean(dim=-1)
+                    tail_norm = token_norm[:, -last_k:].mean(dim=-1)
+                    if attn_weights is not None:
+                        invalid_attn_mass = (attn_weights * (1.0 - token_mask.unsqueeze(1))).sum(dim=-1).mean(dim=-1)
+                        tail_attn = attn_weights[:, :, -last_k:].mean(dim=(1, 2))
+                    else:
+                        invalid_attn_mass = torch.zeros_like(valid_count)
+                        tail_attn = torch.zeros_like(valid_count)
+                    print(
+                        "[seg_mask_debug] "
+                        f"step={self._debug_step} "
+                        f"valid_count={valid_count[:show_n].detach().cpu().tolist()} "
+                        f"nonzero_count={nonzero_count[:show_n].detach().cpu().tolist()} "
+                        f"head_norm={head_norm[:show_n].detach().cpu().tolist()} "
+                        f"tail_norm={tail_norm[:show_n].detach().cpu().tolist()} "
+                        f"invalid_attn_mass={invalid_attn_mass[:show_n].detach().cpu().tolist()} "
+                        f"tail_attn={tail_attn[:show_n].detach().cpu().tolist()}"
+                    )
+                    self._debug_printed += 1
+
+        slot_norm = F.normalize(slot_feats, dim=-1)
+        sim = torch.matmul(slot_norm, slot_norm.transpose(1, 2))
+        eye = torch.eye(self.num_slots, device=sim.device, dtype=torch.bool).unsqueeze(0)
+        off_diag = sim.masked_select(~eye)
+        if off_diag.numel() == 0:
+            diversity_loss = slot_feats.new_zeros(())
+        elif self.diversity_type == "orthogonality":
+            diversity_loss = (off_diag ** 2).mean()
+        else:
+            diversity_loss = F.relu(off_diag - self.diversity_margin).mean()
+
+        return {
+            "slot_feats": slot_feats,
+            "token_score": token_score,
+            "attn_weights": attn_weights,
+            "diversity_loss": diversity_loss,
+        }
+
+
 
 class GMMBlock(nn.Module):
     def __init__(self, config):
@@ -220,8 +374,7 @@ class GMMBlock(nn.Module):
             self.attn1 = BertAttention(config, wid=0.5)
             self.attn2 = BertAttention(config, wid=1.0)
             self.attn3 = BertAttention(config, wid=5.0)
-
-
+        
     def forward(self, input_tensor, attention_mask=None):
         if self.pure_block:
             attention_output = self.attn(input_tensor, attention_mask)
@@ -234,7 +387,7 @@ class GMMBlock(nn.Module):
         o1 = self.attn1(input_tensor, attention_mask).unsqueeze(-1)
         o2 = self.attn2(input_tensor, attention_mask).unsqueeze(-1)
         o3 = self.attn3(input_tensor, attention_mask).unsqueeze(-1)
-
+    
         oo = torch.cat([o0, o1, o2, o3], dim=-1)
         out = torch.mean(oo, dim=-1)
 

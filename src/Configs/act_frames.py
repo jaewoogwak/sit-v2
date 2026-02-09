@@ -5,7 +5,7 @@ import yaml
 cfg = {}
 
 # identity + paths
-cfg['model_name'] = 'SiT-act-frames-gmm-softmil-c7-f3-level-complete'
+cfg['model_name'] = 'SiT-act-frames-gmm-softmil-c7-f3-level-complete-model'
 cfg['dataset_name'] = 'act_frames'
 cfg['seed'] = 9527
 cfg['root'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2'
@@ -14,11 +14,14 @@ cfg['data_root'] = '/dev/ssd1/gjw/prvr/dataset'
 # features + scoring
 cfg['visual_feature'] = 'act_frames'
 cfg['text_feature'] = 'clip'
+# optional override; if non-empty, builder uses this path directly
+cfg['text_feat_path'] = '/dev/ssd1/gjw/prvr/dataset/activitynet/TextData/clip_ViT_B_32_activitynet_token_lnproj_withmask_v1.hdf5'
+# optional token mask hdf5 (key-aligned with text_feat_path). keep empty for legacy behavior.
+cfg['text_mask_path'] = '/dev/ssd1/gjw/prvr/dataset/activitynet/TextData/clip_ViT_B_32_activitynet_token_mask_v1.hdf5'
 cfg['collection'] = 'activitynet'
 cfg['map_size'] = 32
 cfg['clip_scale_w'] = 0.7
 cfg['frame_scale_w'] = 0.3
-
 # boundaries + segmenting
 cfg['frame_feature_dir'] = '/dev/hdd2/gjw/datasets/activitynet/features'
 cfg['boundary_train_path'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/output/boundaries_act_train.json'
@@ -54,7 +57,7 @@ cfg['max_es_cnt'] = 10
 cfg['hard_negative_start_epoch'] = 20
 cfg['hard_pool_size'] = 20
 cfg['use_hard_negative'] = True
-cfg['loss_factor'] = [0.02, 0.04, 0.015, 0.035]
+cfg['loss_factor'] = [0.02, 0.04, 0.015, 0.03]
 cfg['neg_factor'] = [0.2, 32]
 cfg['hier_parent_pow'] = 2
 cfg['debug_hier_loss'] = True
@@ -85,6 +88,25 @@ cfg['context_encoder_type'] = 'gmm'
 cfg['std_transformer_layers'] = 4
 cfg['std_transformer_heads'] = 8
 cfg['std_transformer_ffn_dim'] = 2048
+
+# token decompostition
+cfg['use_seg_token_selector'] = True
+cfg['seg_token_K'] = 8
+cfg['seg_token_proj'] = True
+cfg['seg_token_bertattn_layers'] = 2
+cfg['seg_slot_temp'] = 0.07
+cfg['seg_slot_dropout'] = 0.1
+cfg['seg_diversity_weight'] = 0.2
+cfg['seg_diversity_type'] = 'cosine'
+cfg['seg_diversity_margin'] = 0.2
+cfg['seg_ts_overlap_thr'] = 0.5
+cfg['seg_infonce_temp'] = 0.07
+cfg['seg_infonce_weight'] = 0.15
+cfg['seg_infer_hard_topk'] = True
+cfg['seg_infer_topk'] = cfg['seg_token_K']
+cfg['seg_debug_mask_print'] = True
+cfg['seg_debug_mask_every'] = 20
+cfg['seg_debug_mask_max_print'] = 30
 
 # soft MIL (requires release paths)
 cfg['use_soft_mil'] = True
@@ -209,6 +231,80 @@ def _apply_env_overrides(cfg):
     segment_merge_target = _env_scalar('GMMFORMER_SEGMENT_MERGE_TARGET', float)
     if segment_merge_target is not None:
         cfg['segment_merge_target'] = int(segment_merge_target)
+
+    use_seg_token_selector = _env_bool('GMMFORMER_USE_SEG_TOKEN_SELECTOR')
+    if use_seg_token_selector is not None:
+        cfg['use_seg_token_selector'] = use_seg_token_selector
+
+    seg_token_k = _env_scalar('GMMFORMER_SEG_TOKEN_K', float)
+    if seg_token_k is not None:
+        cfg['seg_token_K'] = int(seg_token_k)
+
+    seg_token_proj = _env_bool('GMMFORMER_SEG_TOKEN_PROJ')
+    if seg_token_proj is not None:
+        cfg['seg_token_proj'] = seg_token_proj
+
+    seg_token_bertattn_layers = _env_scalar('GMMFORMER_SEG_TOKEN_BERTATTN_LAYERS', float)
+    if seg_token_bertattn_layers is not None:
+        cfg['seg_token_bertattn_layers'] = int(seg_token_bertattn_layers)
+
+    seg_slot_temp = _env_scalar('GMMFORMER_SEG_SLOT_TEMP', float)
+    if seg_slot_temp is not None:
+        cfg['seg_slot_temp'] = seg_slot_temp
+
+    seg_slot_dropout = _env_scalar('GMMFORMER_SEG_SLOT_DROPOUT', float)
+    if seg_slot_dropout is not None:
+        cfg['seg_slot_dropout'] = seg_slot_dropout
+
+    seg_diversity_weight = _env_scalar('GMMFORMER_SEG_DIVERSITY_WEIGHT', float)
+    if seg_diversity_weight is not None:
+        cfg['seg_diversity_weight'] = seg_diversity_weight
+
+    seg_diversity_type = os.getenv('GMMFORMER_SEG_DIVERSITY_TYPE', '').strip().lower()
+    if seg_diversity_type:
+        cfg['seg_diversity_type'] = seg_diversity_type
+
+    seg_diversity_margin = _env_scalar('GMMFORMER_SEG_DIVERSITY_MARGIN', float)
+    if seg_diversity_margin is not None:
+        cfg['seg_diversity_margin'] = seg_diversity_margin
+
+    seg_ts_overlap_thr = _env_scalar('GMMFORMER_SEG_TS_OVERLAP_THR', float)
+    if seg_ts_overlap_thr is not None:
+        cfg['seg_ts_overlap_thr'] = seg_ts_overlap_thr
+
+    seg_infonce_temp = _env_scalar('GMMFORMER_SEG_INFONCE_TEMP', float)
+    if seg_infonce_temp is not None:
+        cfg['seg_infonce_temp'] = seg_infonce_temp
+
+    seg_infonce_weight = _env_scalar('GMMFORMER_SEG_INFONCE_WEIGHT', float)
+    if seg_infonce_weight is not None:
+        cfg['seg_infonce_weight'] = seg_infonce_weight
+
+    seg_infer_hard_topk = _env_bool('GMMFORMER_SEG_INFER_HARD_TOPK')
+    if seg_infer_hard_topk is not None:
+        cfg['seg_infer_hard_topk'] = seg_infer_hard_topk
+
+    seg_infer_topk = _env_scalar('GMMFORMER_SEG_INFER_TOPK', float)
+    if seg_infer_topk is not None:
+        cfg['seg_infer_topk'] = int(seg_infer_topk)
+    else:
+        cfg['seg_infer_topk'] = int(cfg['seg_token_K'])
+
+    seg_debug_mask_print = _env_bool('GMMFORMER_SEG_DEBUG_MASK_PRINT')
+    if seg_debug_mask_print is not None:
+        cfg['seg_debug_mask_print'] = seg_debug_mask_print
+
+    seg_debug_mask_every = _env_scalar('GMMFORMER_SEG_DEBUG_MASK_EVERY', float)
+    if seg_debug_mask_every is not None:
+        cfg['seg_debug_mask_every'] = int(seg_debug_mask_every)
+
+    seg_debug_mask_max_print = _env_scalar('GMMFORMER_SEG_DEBUG_MASK_MAX_PRINT', float)
+    if seg_debug_mask_max_print is not None:
+        cfg['seg_debug_mask_max_print'] = int(seg_debug_mask_max_print)
+
+    text_mask_path = os.getenv('GMMFORMER_TEXT_MASK_PATH', '').strip()
+    if text_mask_path:
+        cfg['text_mask_path'] = text_mask_path
 
     model_root = os.getenv('GMMFORMER_MODEL_ROOT', '').strip()
     if model_root:

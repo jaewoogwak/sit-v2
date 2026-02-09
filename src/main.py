@@ -76,6 +76,21 @@ def log_trainable_layers(model, logger):
         logger.info(header + " (none)")
 
 
+def _format_loss_terms(criterion):
+    terms = getattr(criterion, "_last_loss_terms", None)
+    if not isinstance(terms, dict):
+        return ""
+    return (
+        f" cN:{terms.get('clip_nce', 0.0):.3f}"
+        f" cT:{terms.get('clip_trip', 0.0):.3f}"
+        f" fN:{terms.get('frame_nce', 0.0):.3f}"
+        f" fT:{terms.get('frame_trip', 0.0):.3f}"
+        f" q:{terms.get('qdl', 0.0):.3f}"
+        f" h:{terms.get('hier', 0.0):.3f}"
+        f" s:{terms.get('selector', 0.0):.3f}"
+    )
+
+
 def train_one_epoch(epoch, train_loader, model, criterion, cfg, optimizer):
 
     if epoch >= cfg['hard_negative_start_epoch']:
@@ -126,7 +141,10 @@ def train_one_epoch(epoch, train_loader, model, criterion, cfg, optimizer):
             optimizer.zero_grad(set_to_none=True)
 
         loss_meter.update(loss.detach().cpu().item() * accum_steps)
-        train_bar.set_description(f'exp: {cfg["model_name"]} epoch:{epoch:2d} iter:{idx:3d} loss:{loss_meter.avg:.4f}')
+        term_str = _format_loss_terms(criterion)
+        train_bar.set_description(
+            f'exp: {cfg["model_name"]} epoch:{epoch:2d} iter:{idx:3d} loss:{loss_meter.avg:.4f}{term_str}'
+        )
         if cfg.get('debug_hier_loss', False):
             every = int(cfg.get('debug_hier_loss_every', 50) or 50)
             if every <= 0:

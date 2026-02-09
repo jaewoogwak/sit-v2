@@ -123,47 +123,55 @@ def get_datasets(cfg):
     text_reader = None
     text_feature = cfg.get('text_feature', cfg['visual_feature'])
 
-    # Text feature path (prefer meta; avoid huge JSON manifests in memory)
-    if text_feature == 'internvideo2':
-        text_feat_path = cfg.get(
-            'internvideo2_text_h5',
-            os.path.join(rootpath, collection, 'all__samples', 'internvideo2_tvr_all_query_feat.hdf5')
-        )
-        text_reader = InternVideoTextH5(text_feat_path)
-    elif text_feature == 'clip':
-        if collection == 'msrvtt':
-            text_feat_path = os.path.join(rootpath, collection, 'TextData', 'clip_ViT_B_32_msrvtt_query_feat.hdf5')
-        elif collection == 'webvid':
-            text_meta = os.path.join(rootpath, collection, 'TextData', 'text_meta.json')
-            text_manifest = os.path.join(rootpath, collection, 'TextData', 'text_manifest.json')
-            single_text_h5 = os.path.join(rootpath, collection, 'TextData', 'clip_ViT_B_32_webvid_query_feat.hdf5')
-            # Prefer meta if available; else manifest (we convert to auto meta later); else single h5
-            if os.path.exists(text_meta):
-                text_feat_path = text_meta
-            elif os.path.exists(text_manifest):
-                text_feat_path = text_manifest
-            else:
-                text_feat_path = single_text_h5
-        else:
-            text_feat_path = os.path.join(rootpath, collection, 'TextData', f'clip_ViT_B_32_{collection}_query_feat.hdf5')
+    text_feat_path_override = str(cfg.get('text_feat_path', '') or '').strip()
+    # Text feature path (prefer config override when provided)
+    if text_feat_path_override:
+        text_feat_path = text_feat_path_override
+        if text_feature == 'internvideo2':
+            text_reader = InternVideoTextH5(text_feat_path)
+        print(f"[builder] using text_feat_path override: {text_feat_path}")
     else:
-        if collection == 'msrvtt':
-            text_feat_path = os.path.join(rootpath, collection, 'TextData', 'roberta_msrvtt_query_feat.hdf5')
-        elif collection in WEBVID_DUMMY_FAMILIES:
-            base_collection = WEBVID_DUMMY_TEXT_BASE.get(collection, collection)
-            text_dir = os.path.join(rootpath, base_collection, 'TextData')
-            shards_tsv = os.path.join(text_dir, 'roberta_shards.tsv')
-            index_path = os.path.join(text_dir, 'webvid_text_index.json')
-            if os.path.exists(shards_tsv):
-                text_reader = RobertaShardTextReader(text_dir, shards_tsv)
-                text_feat_path = shards_tsv
-            elif os.path.exists(index_path):
-                text_reader = IndexedTextByJsonIndex(text_dir, index_path)
-                text_feat_path = index_path
+        # Text feature path (prefer meta; avoid huge JSON manifests in memory)
+        if text_feature == 'internvideo2':
+            text_feat_path = cfg.get(
+                'internvideo2_text_h5',
+                os.path.join(rootpath, collection, 'all__samples', 'internvideo2_tvr_all_query_feat.hdf5')
+            )
+            text_reader = InternVideoTextH5(text_feat_path)
+        elif text_feature == 'clip':
+            if collection == 'msrvtt':
+                text_feat_path = os.path.join(rootpath, collection, 'TextData', 'clip_ViT_B_32_msrvtt_query_feat.hdf5')
+            elif collection == 'webvid':
+                text_meta = os.path.join(rootpath, collection, 'TextData', 'text_meta.json')
+                text_manifest = os.path.join(rootpath, collection, 'TextData', 'text_manifest.json')
+                single_text_h5 = os.path.join(rootpath, collection, 'TextData', 'clip_ViT_B_32_webvid_query_feat.hdf5')
+                # Prefer meta if available; else manifest (we convert to auto meta later); else single h5
+                if os.path.exists(text_meta):
+                    text_feat_path = text_meta
+                elif os.path.exists(text_manifest):
+                    text_feat_path = text_manifest
+                else:
+                    text_feat_path = single_text_h5
             else:
-                raise FileNotFoundError(f"Neither roberta_shards.tsv nor webvid_text_index.json found under {text_dir}")
+                text_feat_path = os.path.join(rootpath, collection, 'TextData', f'clip_ViT_B_32_{collection}_query_feat.hdf5')
         else:
-            text_feat_path = os.path.join(rootpath, collection, 'TextData', f'roberta_{collection}_query_feat.hdf5')
+            if collection == 'msrvtt':
+                text_feat_path = os.path.join(rootpath, collection, 'TextData', 'roberta_msrvtt_query_feat.hdf5')
+            elif collection in WEBVID_DUMMY_FAMILIES:
+                base_collection = WEBVID_DUMMY_TEXT_BASE.get(collection, collection)
+                text_dir = os.path.join(rootpath, base_collection, 'TextData')
+                shards_tsv = os.path.join(text_dir, 'roberta_shards.tsv')
+                index_path = os.path.join(text_dir, 'webvid_text_index.json')
+                if os.path.exists(shards_tsv):
+                    text_reader = RobertaShardTextReader(text_dir, shards_tsv)
+                    text_feat_path = shards_tsv
+                elif os.path.exists(index_path):
+                    text_reader = IndexedTextByJsonIndex(text_dir, index_path)
+                    text_feat_path = index_path
+                else:
+                    raise FileNotFoundError(f"Neither roberta_shards.tsv nor webvid_text_index.json found under {text_dir}")
+            else:
+                text_feat_path = os.path.join(rootpath, collection, 'TextData', f'roberta_{collection}_query_feat.hdf5')
 
     caption_files = {x: _resolve_caption_path(collection, cap_file[x]) for x in cap_file}
 

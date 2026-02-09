@@ -9,7 +9,7 @@ from easydict import EasyDict as edict
 from Models.gmmformer.model_components import BertAttention, LinearLayer, \
                                             TrainablePositionalEncoding, GMMBlock, \
                                             StandardTransformerEncoder, IdentityEncoder, \
-                                            tome_merge_tokens
+                                            SegmentQueryTokenSelector, tome_merge_tokens
 
 import ipdb
 import time
@@ -76,6 +76,9 @@ class GMMFormer_Net(nn.Module):
         self.modular_vector_mapping = nn.Linear(config.hidden_size, out_features=1, bias=False)
         self.modular_vector_mapping_2 = nn.Linear(config.hidden_size, out_features=1, bias=False)
 
+        self.use_seg_token_selector = bool(getattr(config, "use_seg_token_selector", False))
+        if self.use_seg_token_selector:
+            self.seg_query_selector = SegmentQueryTokenSelector(config)
 
         self.reset_parameters()
 
@@ -118,10 +121,13 @@ class GMMFormer_Net(nn.Module):
             clip_video_feat, frame_video_feat, frame_video_mask, last_level_segments=last_level_segments)
         
         # print(f"##### [Train] Video proposal feat:{vid_proposal_feat.shape} Video feat:{encoded_frame_feat.shape}")
-        clip_scale_scores, clip_scale_scores_, frame_scale_scores, frame_scale_scores_ \
-            = self.get_pred_from_raw_query(
+        pred_out = self.get_pred_from_raw_query(
             query_feat, query_mask, query_labels, vid_proposal_feat, encoded_frame_feat,
             clip_mask=clip_mask, return_query_feats=True)
+        if self.use_seg_token_selector:
+            clip_scale_scores, clip_scale_scores_, frame_scale_scores, frame_scale_scores_, seg_selector_aux = pred_out
+        else:
+            clip_scale_scores, clip_scale_scores_, frame_scale_scores, frame_scale_scores_ = pred_out
 
         label_dict = {}
         for index, label in enumerate(query_labels):
@@ -134,8 +140,10 @@ class GMMFormer_Net(nn.Module):
         video_query = self.encode_query(query_feat, query_mask)
 
         output = [clip_scale_scores, clip_scale_scores_, label_dict, frame_scale_scores, frame_scale_scores_, video_query]
-        if bool(getattr(self.config, "use_soft_mil", False)):
+        if bool(getattr(self.config, "use_soft_mil", False)) or self.use_seg_token_selector:
             output.extend([vid_proposal_feat, clip_mask])
+        if self.use_seg_token_selector:
+            output.append(seg_selector_aux)
         return output
 
 
@@ -425,6 +433,34 @@ class GMMFormer_Net(nn.Module):
         modular_queries = torch.einsum("blm,bld->bmd", modular_attention_scores, encoded_query)  # (N, 2 or 1, D)
         return modular_queries.squeeze()
 
+    def _build_query_token_mask(self, query_feat, query_mask):
+        if query_mask is not None:
+            token_mask = query_mask.to(query_feat.device).float()
+        else:
+            token_mask = torch.ones(query_feat.size(0), query_feat.size(1), device=query_feat.device, dtype=query_feat.dtype)
+        nonzero_mask = (query_feat.abs().sum(dim=-1) > 0).to(token_mask.dtype)
+        return token_mask * nonzero_mask
+
+    def encode_query_for_segments(self, query_feat, query_mask):
+        token_mask = self._build_query_token_mask(query_feat, query_mask)
+        selector_out = self.seg_query_selector(query_feat, token_mask)
+        selector_out["token_mask"] = token_mask
+        return selector_out
+
+    def get_clip_scale_scores_from_slots(self, slot_feats, context_feat, clip_mask=None, normalize=True):
+        if normalize:
+            slot_feats = F.normalize(slot_feats, dim=-1)
+            if not getattr(self.config, 'context_already_normalized', False):
+                context_feat = F.normalize(context_feat, dim=-1)
+
+        sim = torch.einsum("qkd,vsd->qkvs", slot_feats, context_feat)
+        if clip_mask is not None:
+            if clip_mask.dim() == 1:
+                clip_mask = clip_mask.unsqueeze(0)
+            sim = sim.masked_fill(clip_mask.unsqueeze(0).unsqueeze(0) <= 0, -1e10)
+        per_slot_max = torch.max(sim, dim=-1).values
+        return per_slot_max.sum(dim=1)
+
 
     def get_clip_scale_scores(self, modularied_query, context_feat, clip_mask=None, return_timing=False):
 
@@ -485,8 +521,8 @@ class GMMFormer_Net(nn.Module):
             _sync(); t_enc0 = time.perf_counter()
         
         # Encdoing & Normalize
-        video_query = self.encode_query(query_feat, query_mask) # 포함
-        normalized_video_query = F.normalize(video_query, dim=-1) # 얘네위로올리기
+        video_query = self.encode_query(query_feat, query_mask)
+        normalized_video_query = F.normalize(video_query, dim=-1)
         # If context was pre-normalized upstream, reuse as-is
         if getattr(self.config, 'context_already_normalized', False):
             normalized_frame_feat = encoded_frame_feat
@@ -501,8 +537,15 @@ class GMMFormer_Net(nn.Module):
         if return_timing:
             _sync(); t_all0 = time.perf_counter()  # start 2: similarity check starts here
             _sync(); t_c0 = time.perf_counter()
-        clip_scale_scores = self.get_clip_scale_scores(
-            video_query, video_proposal_feat, clip_mask=clip_mask, return_timing=return_timing)
+        seg_selector_aux = None
+        if self.use_seg_token_selector:
+            seg_selector_aux = self.encode_query_for_segments(query_feat, query_mask)
+            clip_scale_scores = self.get_clip_scale_scores_from_slots(
+                seg_selector_aux["slot_feats"], video_proposal_feat, clip_mask=clip_mask, normalize=True
+            )
+        else:
+            clip_scale_scores = self.get_clip_scale_scores(
+                video_query, video_proposal_feat, clip_mask=clip_mask, return_timing=return_timing)
 
         if return_timing:
             _sync(); t_c1 = time.perf_counter()
@@ -541,11 +584,20 @@ class GMMFormer_Net(nn.Module):
             }
         
         if return_query_feats:
-            clip_scale_scores_ = self.get_unnormalized_clip_scale_scores(video_query, video_proposal_feat, clip_mask=clip_mask)
+            if self.use_seg_token_selector:
+                clip_scale_scores_ = self.get_clip_scale_scores_from_slots(
+                    seg_selector_aux["slot_feats"], video_proposal_feat, clip_mask=clip_mask, normalize=False
+                )
+            else:
+                clip_scale_scores_ = self.get_unnormalized_clip_scale_scores(video_query, video_proposal_feat, clip_mask=clip_mask)
             frame_scale_scores_ = torch.matmul(encoded_frame_feat, video_query.t()).permute(1, 0)
             if return_timing:
+                if self.use_seg_token_selector:
+                    return clip_scale_scores, clip_scale_scores_, frame_scale_scores, frame_scale_scores_, seg_selector_aux, timing
                 return clip_scale_scores, clip_scale_scores_, frame_scale_scores, frame_scale_scores_, timing
             else:
+                if self.use_seg_token_selector:
+                    return clip_scale_scores, clip_scale_scores_, frame_scale_scores, frame_scale_scores_, seg_selector_aux
                 return clip_scale_scores, clip_scale_scores_, frame_scale_scores, frame_scale_scores_
         else:
             if return_timing:

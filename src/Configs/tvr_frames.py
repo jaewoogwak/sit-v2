@@ -14,6 +14,7 @@ cfg['data_root'] = '/dev/ssd1/gjw/prvr/dataset'
 # features + scoring
 cfg['visual_feature'] = 'tvr_frames'
 cfg['text_feature'] = 'clip'
+cfg['text_mask_path'] = ''
 cfg['collection'] = 'tvr'
 cfg['map_size'] = 32
 cfg['clip_scale_w'] = 0.7
@@ -86,6 +87,23 @@ cfg['context_encoder_type'] = 'gmm'
 cfg['std_transformer_layers'] = 4
 cfg['std_transformer_heads'] = 8
 cfg['std_transformer_ffn_dim'] = 2048
+cfg['use_seg_token_selector'] = False
+cfg['seg_token_K'] = 8
+cfg['seg_token_proj'] = True
+cfg['seg_token_bertattn_layers'] = 1
+cfg['seg_slot_temp'] = 0.07
+cfg['seg_slot_dropout'] = 0.1
+cfg['seg_diversity_weight'] = 0.2
+cfg['seg_diversity_type'] = 'cosine'
+cfg['seg_diversity_margin'] = 0.2
+cfg['seg_ts_overlap_thr'] = 0.5
+cfg['seg_infonce_temp'] = 0.07
+cfg['seg_infonce_weight'] = 1.0
+cfg['seg_infer_hard_topk'] = True
+cfg['seg_infer_topk'] = cfg['seg_token_K']
+cfg['seg_debug_mask_print'] = False
+cfg['seg_debug_mask_every'] = 20
+cfg['seg_debug_mask_max_print'] = 30
 
 # soft MIL (requires release paths)
 cfg['use_soft_mil'] = True

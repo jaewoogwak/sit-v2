@@ -37,6 +37,17 @@ def get_models(cfg):
         std_transformer_heads=cfg.get('std_transformer_heads', 8),
         std_transformer_ffn_dim=cfg.get('std_transformer_ffn_dim', None),
         use_soft_mil=cfg.get('use_soft_mil', False),
+        use_seg_token_selector=cfg.get('use_seg_token_selector', False),
+        seg_token_K=cfg.get('seg_token_K', 8),
+        seg_token_proj=cfg.get('seg_token_proj', True),
+        seg_token_bertattn_layers=cfg.get('seg_token_bertattn_layers', 1),
+        seg_slot_temp=cfg.get('seg_slot_temp', 0.07),
+        seg_slot_dropout=cfg.get('seg_slot_dropout', 0.1),
+        seg_infer_hard_topk=cfg.get('seg_infer_hard_topk', True),
+        seg_infer_topk=cfg.get('seg_infer_topk', cfg.get('seg_token_K', 8)),
+        seg_debug_mask_print=cfg.get('seg_debug_mask_print', False),
+        seg_debug_mask_every=cfg.get('seg_debug_mask_every', 20),
+        seg_debug_mask_max_print=cfg.get('seg_debug_mask_max_print', 30),
     )
 
     # Choose model based on model type

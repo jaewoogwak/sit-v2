@@ -45,6 +45,7 @@ class loss(nn.Module):
 
         self.qdl = query_diverse_loss(cfg)
         self._hier_eps = 1e-6
+        self._last_loss_terms = None
 
     def forward(self, input_list, batch):
         '''
@@ -65,10 +66,7 @@ class loss(nn.Module):
         frame_scale_scores_ = input_list[4]
 
         use_soft_mil = bool(self.cfg.get('use_soft_mil', False))
-        if use_soft_mil:
-            query = input_list[5]
-        else:
-            query = input_list[-1]
+        query = input_list[5]
 
         if use_soft_mil and len(input_list) >= 8 and 'segment_bounds' in batch and 'text_ts' in batch:
             encoded_clip_feat = input_list[6]
@@ -91,6 +89,8 @@ class loss(nn.Module):
         qdl_loss = self.cfg['loss_factor'][2] * self.qdl(query, label_dict)
 
         loss = clip_nce_loss + clip_trip_loss + frame_nce_loss + frame_trip_loss + qdl_loss
+        hier_term = clip_nce_loss.new_zeros(())
+        selector_term = clip_nce_loss.new_zeros(())
 
         # Optional: segment hierarchy loss (parent-attract, sibling-repel within same parent)
         hier_w = 0.0
@@ -104,13 +104,134 @@ class loss(nn.Module):
                     encoded_clip_feat, clip_mask, segment_bounds, segment_bounds_mask
                 )
                 self._last_hier_stats = hier_stats
-                loss = loss + hier_w * hier_loss
+                hier_term = hier_w * hier_loss
+                loss = loss + hier_term
             else:
                 self._last_hier_stats = {"enabled": False, "reason": "no_segment_bounds"}
         else:
             self._last_hier_stats = {"enabled": False, "reason": "disabled"}
 
+        selector_payload = input_list[-1] if isinstance(input_list[-1], dict) else None
+        if selector_payload is not None and bool(self.cfg.get('use_seg_token_selector', False)):
+            encoded_clip_feat = input_list[6] if len(input_list) > 6 else None
+            clip_mask = input_list[7] if len(input_list) > 7 else None
+            selector_loss = self.get_seg_selector_loss(
+                selector_payload=selector_payload,
+                encoded_clip_feat=encoded_clip_feat,
+                clip_mask=clip_mask,
+                labels=query_labels,
+                batch=batch,
+            )
+            selector_term = selector_loss
+            loss = loss + selector_term
+
+        self._last_loss_terms = {
+            "clip_nce": float(clip_nce_loss.detach().cpu().item()),
+            "clip_trip": float(clip_trip_loss.detach().cpu().item()),
+            "frame_nce": float(frame_nce_loss.detach().cpu().item()),
+            "frame_trip": float(frame_trip_loss.detach().cpu().item()),
+            "qdl": float(qdl_loss.detach().cpu().item()),
+            "hier": float(hier_term.detach().cpu().item()),
+            "selector": float(selector_term.detach().cpu().item()),
+            "total": float(loss.detach().cpu().item()),
+        }
+
         return loss
+
+    def get_seg_selector_loss(self, selector_payload, encoded_clip_feat, clip_mask, labels, batch):
+        slot_feats = selector_payload.get("slot_feats", None)
+        if slot_feats is None or encoded_clip_feat is None:
+            return torch.zeros((), device=slot_feats.device if slot_feats is not None else "cpu")
+        if 'segment_bounds' not in batch or 'text_ts' not in batch:
+            return torch.zeros((), device=slot_feats.device)
+
+        if clip_mask is None:
+            clip_mask = torch.ones(encoded_clip_feat.shape[:2], device=encoded_clip_feat.device, dtype=torch.float32)
+        if clip_mask.dim() == 1:
+            clip_mask = clip_mask.unsqueeze(0)
+
+        seg_bounds = batch['segment_bounds'].to(encoded_clip_feat.device)
+        seg_bounds_mask = batch.get('segment_bounds_mask', None)
+        if seg_bounds_mask is None:
+            seg_bounds_mask = torch.ones(seg_bounds.shape[:2], device=seg_bounds.device, dtype=torch.float32)
+        else:
+            seg_bounds_mask = seg_bounds_mask.to(encoded_clip_feat.device)
+
+        text_ts = batch['text_ts'].to(encoded_clip_feat.device)
+        text_ts_mask = batch.get('text_ts_mask', None)
+        if text_ts_mask is None:
+            text_ts_mask = torch.ones(text_ts.shape[0], device=text_ts.device, dtype=torch.float32)
+        else:
+            text_ts_mask = text_ts_mask.to(encoded_clip_feat.device)
+
+        max_s = min(encoded_clip_feat.size(1), seg_bounds.size(1), clip_mask.size(1), seg_bounds_mask.size(1))
+        encoded_clip_feat = encoded_clip_feat[:, :max_s, :]
+        clip_mask = clip_mask[:, :max_s]
+        seg_bounds = seg_bounds[:, :max_s, :]
+        seg_bounds_mask = seg_bounds_mask[:, :max_s]
+        valid_seg_mask = (clip_mask > 0) & (seg_bounds_mask > 0)
+
+        tau = float(self.cfg.get('seg_infonce_temp', 0.07))
+        overlap_thr = float(self.cfg.get('seg_ts_overlap_thr', 0.5))
+        infonce_w = float(self.cfg.get('seg_infonce_weight', 1.0))
+        div_w = float(self.cfg.get('seg_diversity_weight', 0.2))
+        div_loss = selector_payload.get("diversity_loss", slot_feats.new_zeros(()))
+
+        slot_feats = F.normalize(slot_feats, dim=-1)
+        seg_feats = F.normalize(encoded_clip_feat, dim=-1)
+        sim = torch.einsum("qkd,vsd->qkvs", slot_feats, seg_feats)
+
+        infonce_total = slot_feats.new_zeros(())
+        infonce_count = 0
+        eps = 1e-8
+        for q_idx, vid_idx in enumerate(labels):
+            if q_idx >= text_ts.size(0):
+                continue
+            if int(vid_idx) >= valid_seg_mask.size(0):
+                continue
+            if float(text_ts_mask[q_idx].item()) <= 0:
+                continue
+
+            ts_start = text_ts[q_idx, 0]
+            ts_end = text_ts[q_idx, 1]
+            v = int(vid_idx)
+            pos_bounds = seg_bounds[v]  # (S, 2)
+            pos_valid = valid_seg_mask[v]
+            if not torch.any(pos_valid):
+                continue
+
+            seg_start = pos_bounds[:, 0]
+            seg_end = pos_bounds[:, 1]
+            inter = torch.clamp(torch.min(seg_end, ts_end) - torch.max(seg_start, ts_start), min=0.0)
+            seg_len = torch.clamp(seg_end - seg_start, min=eps)
+            overlap = inter / seg_len
+            pos_mask = pos_valid & (overlap >= overlap_thr)
+            if not torch.any(pos_mask):
+                best_idx = torch.argmax(overlap.masked_fill(~pos_valid, -1e10))
+                pos_mask = torch.zeros_like(pos_valid, dtype=torch.bool)
+                pos_mask[best_idx] = True
+
+            neg_same_mask = pos_valid & (~pos_mask)
+            neg_all_mask = valid_seg_mask.clone()
+            neg_all_mask[v] = neg_same_mask
+
+            slot_sim = sim[q_idx] / max(tau, 1e-6)  # (K, V, S)
+            pos_logits = slot_sim[:, v, :].masked_fill(~pos_mask.unsqueeze(0), -1e10)
+            neg_logits = slot_sim.masked_fill(~neg_all_mask.unsqueeze(0), -1e10)
+
+            pos_lse = torch.logsumexp(pos_logits, dim=-1)
+            neg_lse = torch.logsumexp(neg_logits.view(slot_sim.size(0), -1), dim=-1)
+            pair = torch.stack([pos_lse, neg_lse], dim=-1)
+            slot_loss = torch.logsumexp(pair, dim=-1) - pos_lse
+            infonce_total = infonce_total + slot_loss.mean()
+            infonce_count += 1
+
+        if infonce_count > 0:
+            infonce_loss = infonce_total / float(infonce_count)
+        else:
+            infonce_loss = slot_feats.new_zeros(())
+
+        return infonce_w * infonce_loss + div_w * div_loss
 
     def get_segment_hierarchy_loss(self, encoded_clip_feat, clip_mask, segment_bounds, segment_bounds_mask=None):
         """

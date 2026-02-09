@@ -11,6 +11,10 @@ import logging
 _DEBUG_SHAPES_PRINTED = False
 
 
+def _log_query_h5_open(path):
+    logging.getLogger().info(f"[query_h5] opened: {path}")
+
+
 def _debug_shapes_enabled():
     return os.environ.get('GMMFORMER_DEBUG_SHAPES', '').strip() not in ('', '0', 'false', 'False')
 
@@ -306,19 +310,33 @@ def collate_train(data):
         
         videos_mask[i, :end] = 1.0
 
-    #captions
-    feat_dim = captions[0][0].shape[-1]
+    # captions (legacy: list[tensor], new: {"feats": list[tensor], "masks": list[tensor]})
+    captions_have_mask = isinstance(captions[0], dict) and ('feats' in captions[0])
+    first_caps = captions[0]['feats'] if captions_have_mask else captions[0]
+    feat_dim = first_caps[0].shape[-1]
 
     merge_captions = []
+    merge_caption_masks = []
     all_lengths = []
     labels = []
     cap_ts = []
     cap_ts_mask = []
 
-    for index, caps in enumerate(captions):
+    for index, caps_item in enumerate(captions):
+        if captions_have_mask:
+            caps = caps_item['feats']
+            cap_masks = caps_item.get('masks', None)
+        else:
+            caps = caps_item
+            cap_masks = None
         labels.extend(index for i in range(len(caps)))
         all_lengths.extend(len(cap) for cap in caps)
         merge_captions.extend(cap for cap in caps)
+        if captions_have_mask:
+            if cap_masks is None:
+                merge_caption_masks.extend(torch.ones(len(cap), dtype=torch.float32) for cap in caps)
+            else:
+                merge_caption_masks.extend(mask for mask in cap_masks)
         if cap_timestamps is not None:
             for ts in cap_timestamps[index]:
                 if ts is None:
@@ -334,7 +352,20 @@ def collate_train(data):
     for index, cap in enumerate(merge_captions):
         end = all_lengths[index]
         target[index, :end, :] = cap[:end, :]
-        words_mask[index, :end] = 1.0
+        if captions_have_mask:
+            if index < len(merge_caption_masks):
+                mask = merge_caption_masks[index]
+                if torch.is_tensor(mask):
+                    mask = mask.float()
+                else:
+                    mask = torch.tensor(mask, dtype=torch.float32)
+                mlen = min(int(mask.shape[0]), int(end))
+                if mlen > 0:
+                    words_mask[index, :mlen] = mask[:mlen]
+            else:
+                words_mask[index, :end] = 1.0
+        else:
+            words_mask[index, :end] = 1.0
 
 
 
@@ -407,6 +438,11 @@ def collate_text_val(data):
     if data[0][0] is not None:
         data.sort(key=lambda x: len(x[0]), reverse=True)
     captions,idxs, cap_ids = zip(*data)
+    captions_have_mask = torch.is_tensor(captions[0][0]) if isinstance(captions[0], (tuple, list)) and len(captions[0]) == 2 else False
+    caption_masks = None
+    if captions_have_mask:
+        caption_masks = [x[1] for x in captions]
+        captions = [x[0] for x in captions]
 
     if captions[0] is not None:
         # Merge captions (convert tuple of 1D tensor to 2D tensor)
@@ -416,7 +452,13 @@ def collate_text_val(data):
         for i, cap in enumerate(captions):
             end = lengths[i]
             target[i, :end] = cap[:end]
-            words_mask[i, :end] = 1.0
+            if caption_masks is not None:
+                m = caption_masks[i].float()
+                mlen = min(int(m.shape[0]), int(end))
+                if mlen > 0:
+                    words_mask[i, :mlen] = m[:mlen]
+            else:
+                words_mask[i, :end] = 1.0
     else:
         target = None
         lengths = None
@@ -454,6 +496,7 @@ class Dataset4PRVR(data.Dataset):
                     self.vid_caps[video_id].append(cap_id)
         self.visual_feat = visual_feat
         self.text_feat_path = text_feat_path
+        self.text_mask_path = str(cfg.get('text_mask_path', '') or '').strip()
 
         self.map_size = cfg['map_size']
         self.max_ctx_len = cfg['max_ctx_l']
@@ -469,6 +512,10 @@ class Dataset4PRVR(data.Dataset):
             self.open_file = True
         else:
             self.text_feat = h5py.File(self.text_feat_path, 'r')
+            _log_query_h5_open(self.text_feat_path)
+            self.text_mask_feat = h5py.File(self.text_mask_path, 'r') if self.text_mask_path else None
+            if self.text_mask_feat is not None:
+                _log_query_h5_open(self.text_mask_path)
 
             self.open_file = True
         video_id = self.video_ids[index]
@@ -510,6 +557,7 @@ class Dataset4PRVR(data.Dataset):
 
         # text
         cap_tensors = []
+        cap_masks = []
         for cap_id in cap_ids:
 
             cap_feat = self.text_feat[cap_id][...]
@@ -525,6 +573,17 @@ class Dataset4PRVR(data.Dataset):
 
             cap_tensor = torch.from_numpy(l2_normalize_np_array(cap_feat))[:self.max_desc_len]
             cap_tensors.append(cap_tensor)
+            if self.text_mask_path and self.text_mask_feat is not None and cap_id in self.text_mask_feat:
+                cap_mask = self.text_mask_feat[cap_id][...]
+                if cap_mask.ndim > 1:
+                    cap_mask = cap_mask.reshape(-1)
+                cap_mask = torch.from_numpy(cap_mask.astype(np.float32, copy=False))[:self.max_desc_len]
+                if cap_mask.shape[0] < cap_tensor.shape[0]:
+                    pad = torch.zeros(cap_tensor.shape[0] - cap_mask.shape[0], dtype=torch.float32)
+                    cap_mask = torch.cat([cap_mask, pad], dim=0)
+                cap_masks.append(cap_mask[:cap_tensor.shape[0]])
+            elif self.text_mask_path:
+                cap_masks.append(torch.ones(cap_tensor.shape[0], dtype=torch.float32))
 
         if (not _DEBUG_SHAPES_PRINTED) and _debug_shapes_enabled() and int(index) == 0:
             logging.getLogger().info(
@@ -535,7 +594,11 @@ class Dataset4PRVR(data.Dataset):
             )
             _DEBUG_SHAPES_PRINTED = True
 
-        return clip_video_feature, frame_video_feature, cap_tensors, index, cap_ids, video_id
+        if self.text_mask_path:
+            captions_payload = {'feats': cap_tensors, 'masks': cap_masks}
+        else:
+            captions_payload = cap_tensors
+        return clip_video_feature, frame_video_feature, captions_payload, index, cap_ids, video_id
 
     def __len__(self):
         return self.length
@@ -571,6 +634,7 @@ class TVRFramesDataset4PRVR(data.Dataset):
 
         self.visual_feat = visual_feat
         self.text_feat_path = text_feat_path
+        self.text_mask_path = str(cfg.get('text_mask_path', '') or '').strip()
         self.max_ctx_len = cfg['max_ctx_l']
         self.max_desc_len = cfg['max_desc_l']
         self.release_map = release_map or {}
@@ -672,6 +736,10 @@ class TVRFramesDataset4PRVR(data.Dataset):
             self.open_file = True
         else:
             self.text_feat = h5py.File(self.text_feat_path, 'r')
+            _log_query_h5_open(self.text_feat_path)
+            self.text_mask_feat = h5py.File(self.text_mask_path, 'r') if self.text_mask_path else None
+            if self.text_mask_feat is not None:
+                _log_query_h5_open(self.text_mask_path)
             self.open_file = True
 
         video_id = self.video_ids[index]
@@ -832,20 +900,37 @@ class TVRFramesDataset4PRVR(data.Dataset):
         frame_video_feature = torch.from_numpy(frame_video_feature)
 
         cap_tensors = []
+        cap_masks = []
         for cap_id in cap_ids:
             cap_feat = self.text_feat[cap_id][...]
             if cap_feat.ndim == 1:
                 cap_feat = cap_feat.reshape(1, -1)
             cap_tensor = torch.from_numpy(l2_normalize_np_array(cap_feat))[:self.max_desc_len]
             cap_tensors.append(cap_tensor)
+            if self.text_mask_path and self.text_mask_feat is not None and cap_id in self.text_mask_feat:
+                cap_mask = self.text_mask_feat[cap_id][...]
+                if cap_mask.ndim > 1:
+                    cap_mask = cap_mask.reshape(-1)
+                cap_mask = torch.from_numpy(cap_mask.astype(np.float32, copy=False))[:self.max_desc_len]
+                if cap_mask.shape[0] < cap_tensor.shape[0]:
+                    pad = torch.zeros(cap_tensor.shape[0] - cap_mask.shape[0], dtype=torch.float32)
+                    cap_mask = torch.cat([cap_mask, pad], dim=0)
+                cap_masks.append(cap_mask[:cap_tensor.shape[0]])
+            elif self.text_mask_path:
+                cap_masks.append(torch.ones(cap_tensor.shape[0], dtype=torch.float32))
+
+        if self.text_mask_path:
+            captions_payload = {'feats': cap_tensors, 'masks': cap_masks}
+        else:
+            captions_payload = cap_tensors
 
         if self.use_soft_mil:
             if self.use_last_level_as_frame:
-                return segment_tensors, frame_video_feature, cap_tensors, index, cap_ids, segment_bounds, cap_timestamps, last_level_segments, video_id
-            return segment_tensors, frame_video_feature, cap_tensors, index, cap_ids, video_id, segment_bounds, cap_timestamps
+                return segment_tensors, frame_video_feature, captions_payload, index, cap_ids, segment_bounds, cap_timestamps, last_level_segments, video_id
+            return segment_tensors, frame_video_feature, captions_payload, index, cap_ids, video_id, segment_bounds, cap_timestamps
         if self.use_last_level_as_frame:
-            return segment_tensors, frame_video_feature, cap_tensors, index, cap_ids, last_level_segments, video_id
-        return segment_tensors, frame_video_feature, cap_tensors, index, cap_ids, video_id
+            return segment_tensors, frame_video_feature, captions_payload, index, cap_ids, last_level_segments, video_id
+        return segment_tensors, frame_video_feature, captions_payload, index, cap_ids, video_id
 
     def __len__(self):
         return self.length
@@ -1194,6 +1279,7 @@ class TxtDataSet4PRVR(data.Dataset):
                 self.captions[cap_id] = caption
                 self.cap_ids.append(cap_id)
         self.text_feat_path = text_feat_path
+        self.text_mask_path = str(cfg.get('text_mask_path', '') or '').strip()
         self.max_desc_len = cfg['max_desc_l']
         self.open_file = False
         self.length = len(self.cap_ids)
@@ -1204,6 +1290,10 @@ class TxtDataSet4PRVR(data.Dataset):
             self.open_file = True
         else:
             self.text_feat = h5py.File(self.text_feat_path, 'r')
+            _log_query_h5_open(self.text_feat_path)
+            self.text_mask_feat = h5py.File(self.text_mask_path, 'r') if self.text_mask_path else None
+            if self.text_mask_feat is not None:
+                _log_query_h5_open(self.text_mask_path)
 
             self.open_file = True
 
@@ -1221,11 +1311,25 @@ class TxtDataSet4PRVR(data.Dataset):
             cap_feat = cap_feat.reshape(1, -1)  # (512,) -> (1, 512)
 
         cap_tensor = torch.from_numpy(l2_normalize_np_array(cap_feat))[:self.max_desc_len]
+        cap_mask = None
+        if self.text_mask_path and self.text_mask_feat is not None and cap_id in self.text_mask_feat:
+            raw_mask = self.text_mask_feat[cap_id][...]
+            if raw_mask.ndim > 1:
+                raw_mask = raw_mask.reshape(-1)
+            cap_mask = torch.from_numpy(raw_mask.astype(np.float32, copy=False))[:self.max_desc_len]
+            if cap_mask.shape[0] < cap_tensor.shape[0]:
+                pad = torch.zeros(cap_tensor.shape[0] - cap_mask.shape[0], dtype=torch.float32)
+                cap_mask = torch.cat([cap_mask, pad], dim=0)
+            cap_mask = cap_mask[:cap_tensor.shape[0]]
+        elif self.text_mask_path:
+            cap_mask = torch.ones(cap_tensor.shape[0], dtype=torch.float32)
 
         if (not _DEBUG_SHAPES_PRINTED) and _debug_shapes_enabled() and int(index) == 0:
             logging.getLogger().info(f"DEBUG[text-only out] cap_tensor={_shape_str(cap_tensor)}")
             _DEBUG_SHAPES_PRINTED = True
 
+        if cap_mask is not None:
+            return (cap_tensor, cap_mask), index, cap_id
         return cap_tensor, index, cap_id
 
     def __len__(self):
