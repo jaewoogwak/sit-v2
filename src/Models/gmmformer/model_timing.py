@@ -24,6 +24,7 @@ class GMMFormer_Net(nn.Module):
         super(GMMFormer_Net, self).__init__()
         self.config = config
         self._debug_last_level_printed = False
+        self.weight_token = nn.Parameter(torch.randn(1, 1, config.hidden_size))
 
         self.query_pos_embed = TrainablePositionalEncoding(max_position_embeddings=config.max_desc_l,
                                                            hidden_size=config.hidden_size, dropout=config.input_drop)
@@ -166,8 +167,8 @@ class GMMFormer_Net(nn.Module):
             encoded_clip_feat, clip_mask = self.encode_segments(clip_video_feat)
         else:
             encoded_clip_feat = self.encode_input(clip_video_feat, None, self.clip_input_proj, self.clip_encoder,
-                                                  self.clip_pos_embed)
-            encoded_clip_feat = self.clip_encoder_2(encoded_clip_feat, None)                # [bs, 32, 384]
+                                                  self.clip_pos_embed, weight_token=self.weight_token)
+            encoded_clip_feat = self._run_encoder(self.clip_encoder_2, encoded_clip_feat, None)                # [bs, 32, 384]
 
         use_last_level = bool(getattr(self.config, "use_last_level_as_frame", False))
         boundary_level = str(getattr(self.config, "boundary_level", "")).lower()
@@ -195,8 +196,8 @@ class GMMFormer_Net(nn.Module):
         else:
             encoded_frame_feat = self.encode_input(frame_video_feat, video_mask, self.frame_input_proj,
                                                     self.frame_encoder_1,
-                                                    self.frame_pos_embed)                   # [bs, N, 384]
-            encoded_frame_feat = self.frame_encoder_2(encoded_frame_feat, video_mask.unsqueeze(1))
+                                                    self.frame_pos_embed, weight_token=self.weight_token)                   # [bs, N, 384]
+            encoded_frame_feat = self._run_encoder(self.frame_encoder_2, encoded_frame_feat, video_mask.unsqueeze(1))
 
             encoded_frame_feat = self.get_modularized_frames(encoded_frame_feat, video_mask)
 
@@ -257,8 +258,8 @@ class GMMFormer_Net(nn.Module):
             seg_batch = self.clip_input_proj(seg_batch)
             seg_batch = self.segment_pos_embed(seg_batch)
             attn_mask = mask_batch.unsqueeze(1)
-            seg_batch = self.clip_encoder(seg_batch, attn_mask)
-            seg_batch = self.clip_encoder_2(seg_batch, attn_mask)
+            seg_batch = self._run_encoder(self.clip_encoder, seg_batch, attn_mask)
+            seg_batch = self._run_encoder(self.clip_encoder_2, seg_batch, attn_mask)
             denom = mask_batch.sum(dim=1).clamp_min(1.0).unsqueeze(-1)
             seg_batch = (seg_batch * mask_batch.unsqueeze(-1)).sum(dim=1) / denom
             encoded_segments[chunk_idx] = seg_batch
@@ -357,8 +358,8 @@ class GMMFormer_Net(nn.Module):
             seg_batch = input_proj_layer(seg_batch)
             seg_batch = pos_embed_layer(seg_batch)
             attn_mask = mask_batch.unsqueeze(1)
-            seg_batch = encoder_layer(seg_batch, attn_mask)
-            seg_batch = encoder_layer_2(seg_batch, attn_mask)
+            seg_batch = self._run_encoder(encoder_layer, seg_batch, attn_mask)
+            seg_batch = self._run_encoder(encoder_layer_2, seg_batch, attn_mask)
             denom = mask_batch.sum(dim=1).clamp_min(1.0).unsqueeze(-1)
             seg_batch = (seg_batch * mask_batch.unsqueeze(-1)).sum(dim=1) / denom
             encoded_segments[chunk_idx] = seg_batch
@@ -391,8 +392,12 @@ class GMMFormer_Net(nn.Module):
             mask[i, :s] = 1.0
         return padded, mask
 
-    @staticmethod
-    def encode_input(feat, mask, input_proj_layer, encoder_layer, pos_embed_layer):
+    def _run_encoder(self, encoder_layer, feat, mask):
+        if isinstance(encoder_layer, GMMBlock):
+            return encoder_layer(feat, mask, self.weight_token)
+        return encoder_layer(feat, mask)
+
+    def encode_input(self, feat, mask, input_proj_layer, encoder_layer, pos_embed_layer, weight_token=None):
         """
         Args:
             feat: (N, L, D_input), torch.float32
@@ -406,6 +411,8 @@ class GMMFormer_Net(nn.Module):
         feat = pos_embed_layer(feat)
         if mask is not None:
             mask = mask.unsqueeze(1)  # (N, 1, L), torch.FloatTensor
+        if isinstance(encoder_layer, GMMBlock):
+            return encoder_layer(feat, mask, weight_token)  # (N, L, D_hidden)
         return encoder_layer(feat, mask)  # (N, L, D_hidden)
 
 

@@ -5,7 +5,7 @@ import yaml
 cfg = {}
 
 # identity + paths
-cfg['model_name'] = 'SiT-act-frames-gmm-softmil-c7-f3-level-complete-model'
+cfg['model_name'] = 'SiT-act-frames-gmm-softmil-c7-f3-level-complete-model-gaussian'
 cfg['dataset_name'] = 'act_frames'
 cfg['seed'] = 9527
 cfg['root'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2'
@@ -15,9 +15,9 @@ cfg['data_root'] = '/dev/ssd1/gjw/prvr/dataset'
 cfg['visual_feature'] = 'act_frames'
 cfg['text_feature'] = 'clip'
 # optional override; if non-empty, builder uses this path directly
-cfg['text_feat_path'] = '/dev/ssd1/gjw/prvr/dataset/activitynet/TextData/clip_ViT_B_32_activitynet_token_lnproj_withmask_v1.hdf5'
+cfg['text_feat_path'] = ''
 # optional token mask hdf5 (key-aligned with text_feat_path). keep empty for legacy behavior.
-cfg['text_mask_path'] = '/dev/ssd1/gjw/prvr/dataset/activitynet/TextData/clip_ViT_B_32_activitynet_token_mask_v1.hdf5'
+cfg['text_mask_path'] = ''
 cfg['collection'] = 'activitynet'
 cfg['map_size'] = 32
 cfg['clip_scale_w'] = 0.7
@@ -67,6 +67,8 @@ cfg['debug_hier_loss_every'] = 20
 # eval
 cfg['eval_query_bsz'] = 50
 cfg['eval_context_bsz'] = 100
+cfg['eval_debug_slot_sim'] = False
+cfg['eval_debug_slot_topk'] = 5
 
 
 # model
@@ -90,18 +92,18 @@ cfg['std_transformer_heads'] = 8
 cfg['std_transformer_ffn_dim'] = 2048
 
 # token decompostition
-cfg['use_seg_token_selector'] = True
-cfg['seg_token_K'] = 8
+cfg['use_seg_token_selector'] = False
+cfg['seg_token_K'] = 5
 cfg['seg_token_proj'] = True
 cfg['seg_token_bertattn_layers'] = 2
 cfg['seg_slot_temp'] = 0.07
 cfg['seg_slot_dropout'] = 0.1
-cfg['seg_diversity_weight'] = 0.2
+cfg['seg_diversity_weight'] = 0.8
 cfg['seg_diversity_type'] = 'cosine'
-cfg['seg_diversity_margin'] = 0.2
+cfg['seg_diversity_margin'] = 0.3
 cfg['seg_ts_overlap_thr'] = 0.5
 cfg['seg_infonce_temp'] = 0.07
-cfg['seg_infonce_weight'] = 0.15
+cfg['seg_infonce_weight'] = 1
 cfg['seg_infer_hard_topk'] = True
 cfg['seg_infer_topk'] = cfg['seg_token_K']
 cfg['seg_debug_mask_print'] = True

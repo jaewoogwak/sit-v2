@@ -66,6 +66,8 @@ cfg['debug_hier_loss_every'] = 20
 # eval
 cfg['eval_query_bsz'] = 50
 cfg['eval_context_bsz'] = 100
+cfg['eval_debug_slot_sim'] = False
+cfg['eval_debug_slot_topk'] = 5
 
 
 # model

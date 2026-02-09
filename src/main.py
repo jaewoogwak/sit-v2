@@ -47,6 +47,8 @@ parser.add_argument('--eval_debug_topk', type=int, default=10, help='Top-K video
 parser.add_argument('--eval_debug_segment_topk', type=int, default=5, help='Top-K segments to print per query for eval debug')
 parser.add_argument('--eval_debug_frames_root', type=str, default='', help='Frames root for eval debug segment visualization')
 parser.add_argument('--eval_debug_segment_frames', type=int, default=8, help='Frames per segment to show in eval debug visualization')
+parser.add_argument('--eval_debug_slot_sim', action='store_true', help='Print slot-vs-segment similarities in eval debug mode')
+parser.add_argument('--eval_debug_slot_topk', type=int, default=5, help='Top-K segments (by slot-sum) to print in eval debug mode')
 parser.add_argument('--resume', default='', type=str)
 parser.add_argument('--steps_per_epoch', type=int, default=-1,
                     help='limit number of training steps per epoch (cap); set -1 to disable')
@@ -296,6 +298,8 @@ def main():
         cfg['eval_debug_segment_frames'] = int(getattr(args, 'eval_debug_segment_frames', 0) or 0)
         cfg['eval_debug_topk'] = int(args.eval_debug_topk or 0)
         cfg['eval_debug_segment_topk'] = int(args.eval_debug_segment_topk or 0)
+        cfg['eval_debug_slot_sim'] = bool(getattr(args, 'eval_debug_slot_sim', False))
+        cfg['eval_debug_slot_topk'] = int(getattr(args, 'eval_debug_slot_topk', 0) or 0)
         cfg['debug_shapes'] = bool(getattr(args, 'debug_shapes', False))
     except Exception:
         pass

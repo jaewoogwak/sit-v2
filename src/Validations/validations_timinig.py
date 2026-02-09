@@ -611,6 +611,8 @@ class validations(nn.Module):
         os.makedirs(video_out_dir, exist_ok=True)
         frames_root = str(self.cfg.get('eval_debug_frames_root', '')).strip()
         segment_frames = int(self.cfg.get('eval_debug_segment_frames', 0) or 0)
+        debug_slot_sim = bool(self.cfg.get("eval_debug_slot_sim", False))
+        debug_slot_topk = int(self.cfg.get("eval_debug_slot_topk", 5) or 5)
 
         needed = set(gt_cap_ids)
         query_cache = {}
@@ -669,6 +671,8 @@ class validations(nn.Module):
             clip_s_row = None
             frame_s_row = None
             video_query = None
+            slot_seg_sims = None
+            slot_seg_scores = None
             if cap_id in query_cache:
                 query_feat, query_mask = query_cache[cap_id]
                 get_pred = _get_model_attr(model, "get_pred_from_raw_query")
@@ -689,6 +693,23 @@ class validations(nn.Module):
                     if video_query.dim() == 1:
                         video_query = video_query.unsqueeze(0)
                     video_query = F.normalize(video_query, dim=-1)
+
+                use_selector = bool(_get_model_attr(model, "use_seg_token_selector", False))
+                encode_query_for_segments = _get_model_attr(model, "encode_query_for_segments")
+                if debug_slot_sim and use_selector and callable(encode_query_for_segments):
+                    with torch.no_grad():
+                        selector_out = encode_query_for_segments(query_feat, query_mask)
+                        slot_feats = selector_out.get("slot_feats", None)
+                    if slot_feats is not None:
+                        ctx_feat = context_info["video_proposal_feat"][vid_idx]
+                        ctx_feat = F.normalize(ctx_feat, dim=-1)
+                        slot_feats = F.normalize(slot_feats.squeeze(0), dim=-1)  # (K, D)
+                        slot_seg = torch.matmul(slot_feats, ctx_feat.t())  # (K, S)
+                        if seg_mask is not None:
+                            valid = seg_mask.bool()
+                            slot_seg = slot_seg.masked_fill(~valid.unsqueeze(0), -1e10)
+                        slot_seg_sims = slot_seg.detach().cpu()
+                        slot_seg_scores = torch.sum(slot_seg_sims, dim=0)  # (S,)
 
             scores_row = score_sum[q_idx]
             k = min(topk, scores_row.numel())
@@ -791,6 +812,8 @@ class validations(nn.Module):
                     print(f"  {r:2d}. {vid_name} score={v_score:.4f}{seg_info}")
 
             seg_scores_list = []
+            slot_seg_sims_list = None
+            slot_seg_scores_list = None
             if cap_id in query_cache:
                 if video_query is None:
                     print("top_segments: (model has no encode_query)")
@@ -809,6 +832,60 @@ class validations(nn.Module):
                     for r, (s_idx, s_score) in enumerate(zip(seg_idxs.tolist(), seg_vals.tolist()), start=1):
                         print(f"  {r:2d}. segment={s_idx} score={s_score:.4f}")
                     seg_scores_list = seg_scores.detach().cpu().tolist()
+                    if slot_seg_sims is not None:
+                        valid_len = len(seg_scores_list)
+                        slot_seg_sims_list = slot_seg_sims[:, :valid_len].tolist()
+                        slot_seg_scores_list = slot_seg_scores[:valid_len].tolist()
+                        k_slot = slot_seg_sims.shape[0]
+                        print(f"slot_sim: K={k_slot} segments={valid_len}")
+                        if valid_len > 0:
+                            dbg_k = min(max(1, debug_slot_topk), valid_len)
+                            top_vals_slot, top_idxs_slot = torch.topk(slot_seg_scores[:valid_len], k=dbg_k, largest=True)
+                            print("top_segments_by_slot_sum:")
+                            for r, (s_idx, s_score) in enumerate(zip(top_idxs_slot.tolist(), top_vals_slot.tolist()), start=1):
+                                seg_info = ""
+                                if 0 <= s_idx < len(segment_bounds):
+                                    s, e = segment_bounds[s_idx]
+                                    seg_info = f" [{int(s)},{int(e)}]"
+                                per_slot = [float(slot_seg_sims[k, s_idx].item()) for k in range(k_slot)]
+                                orig_score = None
+                                if 0 <= s_idx < len(seg_scores_list):
+                                    orig_score = float(seg_scores_list[s_idx])
+                                slot_parts = [f"s{k}:{v:.4f}" for k, v in enumerate(per_slot)]
+                                slot_line = " | ".join(slot_parts)
+                                if orig_score is not None:
+                                    delta = float(s_score) - float(orig_score)
+                                    print(f"  {r:2d}) seg={s_idx}{seg_info}")
+                                    print(f"      slot_sum={s_score:.4f} | original_q={orig_score:.4f} | delta={delta:+.4f}")
+                                    print(f"      {slot_line}")
+                                else:
+                                    print(f"  {r:2d}) seg={s_idx}{seg_info}")
+                                    print(f"      slot_sum={s_score:.4f} | original_q=NA")
+                                    print(f"      {slot_line}")
+
+                            print("top_segments_by_each_slot:")
+                            for k_idx in range(k_slot):
+                                slot_scores_k = slot_seg_sims[k_idx, :valid_len]
+                                vals_k, idxs_k = torch.topk(slot_scores_k, k=dbg_k, largest=True)
+                                print(f"  slot {k_idx}:")
+                                for r, (s_idx, s_score) in enumerate(zip(idxs_k.tolist(), vals_k.tolist()), start=1):
+                                    seg_info = ""
+                                    if 0 <= s_idx < len(segment_bounds):
+                                        s, e = segment_bounds[s_idx]
+                                        seg_info = f" [{int(s)},{int(e)}]"
+                                    orig_score = None
+                                    if 0 <= s_idx < len(seg_scores_list):
+                                        orig_score = float(seg_scores_list[s_idx])
+                                    if orig_score is not None:
+                                        print(
+                                            f"    {r:2d}) seg={s_idx}{seg_info} "
+                                            f"slot{k_idx}={s_score:.4f} | original_q={orig_score:.4f}"
+                                        )
+                                    else:
+                                        print(
+                                            f"    {r:2d}) seg={s_idx}{seg_info} "
+                                            f"slot{k_idx}={s_score:.4f} | original_q=NA"
+                                        )
 
                     if frames_root and segment_frames > 0 and segment_bounds:
                         video_dir = _resolve_video_dir(frames_root, video_id)
@@ -860,6 +937,8 @@ class validations(nn.Module):
                 "segment_scores_count": seg_scores_count,
                 "segment_bounds_count": bounds_count,
                 "segment_bounds_mismatch": bool(bounds_count and seg_scores_list and bounds_count != len(seg_scores_list)),
+                "slot_segment_sims": slot_seg_sims_list,
+                "slot_segment_scores": slot_seg_scores_list,
             }
             debug_json["gt_queries"].append(query_json)
 

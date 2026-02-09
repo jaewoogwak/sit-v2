@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DATASET="${1:-tvr_frames}"
-CKPT="${2:-}"
-VIDEO_ID="${3:-}"
+DATASET="${1:-act_frames}"
+CKPT="${2:-/dev/ssd1/gjw/prvr/semantic-transformer-v2/results/act_frames/SiT-act-frames-gmm-softmil-c7-f3-level-complete-model/best.ckpt}"
+VIDEO_ID="${3:-v_9XmzbuByY_E}"
 shift $(( $# < 3 ? $# : 3 ))
 
 case "${DATASET}" in
@@ -20,7 +20,7 @@ if [[ -z "$VIDEO_ID" ]]; then
 fi
 
 TOPK="${TOPK:-10}"
-SEG_TOPK="${SEG_TOPK:-5}"
+SEG_TOPK="${SEG_TOPK:-10}"
 GPU="${GPU:-0}"
 FRAMES_ROOT="${FRAMES_ROOT:-}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
