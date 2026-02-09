@@ -14,6 +14,7 @@ class query_diverse_loss(nn.Module):
         torch.nn.Module.__init__(self)
         self.mrg = config['neg_factor'][0]
         self.alpha = config['neg_factor'][1]
+        self.gamma = config['neg_factor'][2]
         
     def forward(self, x, label_dict):
 
@@ -26,12 +27,13 @@ class query_diverse_loss(nn.Module):
             N_one_hot[label[0]:(label[-1]+1), label[0]:(label[-1]+1)] = torch.ones((len(label), len(label)))
         N_one_hot = N_one_hot - torch.eye(bs)
         N_one_hot = N_one_hot.cuda()
-    
-        neg_exp = torch.exp(self.alpha * (cos + self.mrg))
-        
-        N_sim_sum = torch.where(N_one_hot == 1, neg_exp, torch.zeros_like(neg_exp)).sum(dim=0)
-    
-        neg_term = torch.log(1 + N_sim_sum).sum() / bs
+
+        weight = (1 + cos) ** self.gamma
+        log_term = torch.log1p(torch.exp(self.alpha * (cos + self.mrg)))
+        weighted_term = weight * log_term
+        valid_pair = (N_one_hot == 1)
+        n_valid = valid_pair.sum().clamp_min(1)
+        neg_term = torch.where(valid_pair, weighted_term, torch.zeros_like(weighted_term)).sum() / n_valid
         
         return neg_term
 
