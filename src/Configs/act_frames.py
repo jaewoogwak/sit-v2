@@ -22,6 +22,9 @@ cfg['collection'] = 'activitynet'
 cfg['map_size'] = 32
 cfg['clip_scale_w'] = 0.7
 cfg['frame_scale_w'] = 0.3
+cfg['clip_pooling'] = 'topk_soft'
+cfg['clip_topk'] = 3
+cfg['clip_topk_temp'] = 0.07
 # boundaries + segmenting
 cfg['frame_feature_dir'] = '/dev/hdd2/gjw/datasets/activitynet/features'
 cfg['boundary_train_path'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/output/boundaries_act_train.json'
@@ -227,6 +230,18 @@ def _apply_env_overrides(cfg):
     frame_scale_w = _env_scalar('GMMFORMER_FRAME_SCALE_W', float)
     if frame_scale_w is not None:
         cfg['frame_scale_w'] = frame_scale_w
+
+    clip_pooling = os.getenv('GMMFORMER_CLIP_POOLING', '').strip().lower()
+    if clip_pooling:
+        cfg['clip_pooling'] = clip_pooling
+
+    clip_topk = _env_scalar('GMMFORMER_CLIP_TOPK', float)
+    if clip_topk is not None:
+        cfg['clip_topk'] = int(clip_topk)
+
+    clip_topk_temp = _env_scalar('GMMFORMER_CLIP_TOPK_TEMP', float)
+    if clip_topk_temp is not None:
+        cfg['clip_topk_temp'] = clip_topk_temp
 
     input_drop = _env_scalar('GMMFORMER_INPUT_DROP', float)
     if input_drop is not None:

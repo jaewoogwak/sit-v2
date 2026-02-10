@@ -468,6 +468,23 @@ class GMMFormer_Net(nn.Module):
         per_slot_max = torch.max(sim, dim=-1).values
         return per_slot_max.sum(dim=1)
 
+    def _aggregate_segment_scores(self, segment_scores):
+        pooling = str(getattr(self.config, "clip_pooling", "max") or "max").strip().lower()
+        if pooling in ("max", "hardmax"):
+            return torch.max(segment_scores, dim=1).values
+        if pooling in ("topk_soft", "topk-soft", "topk"):
+            topk = int(getattr(self.config, "clip_topk", 3) or 1)
+            temp = float(getattr(self.config, "clip_topk_temp", 0.07) or 0.07)
+            if topk <= 0:
+                raise ValueError(f"clip_topk must be >= 1, got {topk}")
+            if temp <= 0:
+                raise ValueError(f"clip_topk_temp must be > 0, got {temp}")
+            k = min(topk, segment_scores.size(1))
+            top_vals, _ = torch.topk(segment_scores, k=k, dim=1, largest=True)
+            weights = F.softmax(top_vals / temp, dim=1)
+            return (weights * top_vals).sum(dim=1)
+        raise ValueError(f"Unsupported clip_pooling: {pooling}")
+
 
     def get_clip_scale_scores(self, modularied_query, context_feat, clip_mask=None, return_timing=False):
 
@@ -497,25 +514,23 @@ class GMMFormer_Net(nn.Module):
             mask = clip_mask.transpose(0, 1).unsqueeze(0)
             clip_level_query_context_scores = clip_level_query_context_scores.masked_fill(mask == 0, -1e10)
 
-        query_context_scores, indices = torch.max(clip_level_query_context_scores,
-                                                  dim=1)
-        
-        return query_context_scores
+        return self._aggregate_segment_scores(clip_level_query_context_scores)
 
 
-    @staticmethod
-    def get_unnormalized_clip_scale_scores(modularied_query, context_feat, clip_mask=None):
+    def get_unnormalized_clip_scale_scores(self, modularied_query, context_feat, clip_mask=None):
 
-        query_context_scores = torch.matmul(context_feat, modularied_query.t()).permute(2, 1, 0)
+        matmul_result = torch.matmul(context_feat, modularied_query.t())
+        if matmul_result.dim() == 2:  # (V, K) when batch=1
+            query_context_scores = matmul_result.permute(1, 0).unsqueeze(0)
+        else:
+            query_context_scores = matmul_result.permute(2, 1, 0)
         if clip_mask is not None:
             if clip_mask.dim() == 1:
                 clip_mask = clip_mask.unsqueeze(0)
             mask = clip_mask.transpose(0, 1).unsqueeze(0)
             query_context_scores = query_context_scores.masked_fill(mask == 0, -1e10)
 
-        output_query_context_scores, indices = torch.max(query_context_scores, dim=1)
-
-        return output_query_context_scores
+        return self._aggregate_segment_scores(query_context_scores)
 
 
     def get_pred_from_raw_query(self, query_feat, query_mask, query_labels=None,

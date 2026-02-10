@@ -374,9 +374,9 @@ class GMMBlock(nn.Module):
             self.attn1 = BertAttention(config, wid=0.1)
             self.attn2 = BertAttention(config, wid=1.0)
             self.attn3 = BertAttention(config, wid=5.0)
-            # self.ca = BertCrossAttention(config)
-            # self.agg_fc1 = nn.Linear(config.hidden_size, config.hidden_size)
-            # self.agg_fc2 = nn.Linear(config.hidden_size, 4)
+            self.ca = BertCrossAttention(config)
+            self.agg_fc1 = nn.Linear(config.hidden_size, config.hidden_size)
+            self.agg_fc2 = nn.Linear(config.hidden_size, 4)
         
     def forward(self, input_tensor, attention_mask=None, weight_token=None):
         if self.pure_block:
@@ -392,15 +392,15 @@ class GMMBlock(nn.Module):
         o3 = self.attn3(input_tensor, attention_mask).unsqueeze(-1)
     
         oo = torch.cat([o0, o1, o2, o3], dim=-1)
-        # if weight_token is not None:
-        #     # Dynamic aggregation over 4 Gaussian branches with variable sequence length.
-        #     token = weight_token.expand(input_tensor.size(0), -1, -1)
-        #     agg_feat = self.ca(input_tensor, token, token, attention_mask=None)
-        #     agg_logits = self.agg_fc2(F.gelu(self.agg_fc1(agg_feat)))
-        #     agg_weight = F.softmax(agg_logits, dim=-1).unsqueeze(2)
-        #     out = torch.sum(oo * agg_weight, dim=-1)
-        # else:
-        out = torch.mean(oo, dim=-1)
+        if weight_token is not None:
+            # Dynamic aggregation over 4 Gaussian branches with variable sequence length.
+            token = weight_token.expand(input_tensor.size(0), -1, -1)
+            agg_feat = self.ca(input_tensor, token, token, attention_mask=None)
+            agg_logits = self.agg_fc2(F.gelu(self.agg_fc1(agg_feat)))
+            agg_weight = F.softmax(agg_logits, dim=-1).unsqueeze(2)
+            out = torch.sum(oo * agg_weight, dim=-1)
+        else:
+            out = torch.mean(oo, dim=-1)
 
         return out
 
