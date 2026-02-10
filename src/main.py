@@ -100,6 +100,20 @@ def train_one_epoch(epoch, train_loader, model, criterion, cfg, optimizer):
     else:
         criterion.cfg['use_hard_negative'] = False
 
+    # Drop base LR once at hard-negative start epoch, then keep scheduler behavior unchanged.
+    hard_neg_lr_scale = float(cfg.get('hard_negative_lr_scale', 1.0) or 1.0)
+    hard_neg_lr_drop_once = bool(cfg.get('hard_negative_lr_drop_once', True))
+    if hard_neg_lr_scale <= 0:
+        raise ValueError(f"hard_negative_lr_scale must be > 0, got {hard_neg_lr_scale}")
+    should_drop_lr = (
+        hard_neg_lr_drop_once
+        and epoch == int(cfg['hard_negative_start_epoch'])
+        and hard_neg_lr_scale != 1.0
+    )
+    if should_drop_lr:
+        for group in optimizer.param_groups:
+            group['lr'] *= hard_neg_lr_scale
+
     loss_meter = AverageMeter()
 
     model.train()
@@ -117,8 +131,16 @@ def train_one_epoch(epoch, train_loader, model, criterion, cfg, optimizer):
     grad_clip = getattr(args, 'grad_clip', 1.0)
 
     total = max_steps if use_cap else len(train_loader)
+    base_lrs = ",".join(f"{group['lr']:.7f}" for group in optimizer.param_groups)
     train_bar = tqdm(train_loader, desc=f"epoch {epoch}", total=total,
                      unit="batch", dynamic_ncols=True, mininterval=1.0)
+    train_bar.write(
+        f"[train] epoch={epoch} use_hard_negative={criterion.cfg['use_hard_negative']} base_lrs={base_lrs}"
+    )
+    if should_drop_lr:
+        train_bar.write(
+            f"[train] hard_negative_start_epoch reached; applied lr scale={hard_neg_lr_scale}"
+        )
 
 
     optimizer.zero_grad(set_to_none=True)

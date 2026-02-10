@@ -5,7 +5,7 @@ import yaml
 cfg = {}
 
 # identity + paths
-cfg['model_name'] = 'SiT-act-frames-gmm-softmil-c7-f3-level-complete-model-gaussian'
+cfg['model_name'] = 'SiT-act-frames-gmm-softmil-c7-f3-level-complete-revamped_qdl'
 cfg['dataset_name'] = 'act_frames'
 cfg['seed'] = 9527
 cfg['root'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2'
@@ -39,7 +39,7 @@ cfg['ckpt_path'] = os.path.join(cfg['model_root'], 'ckpt')
 cfg['num_workers'] = 32
 cfg['no_core_driver'] = False
 cfg['no_pin_memory'] = False
-cfg['batchsize'] = 64
+cfg['batchsize'] = 128
 cfg['persistent_workers'] = True
 cfg['prefetch_factor'] = 2
 
@@ -54,11 +54,13 @@ cfg['margin'] = 0.1
 # train
 cfg['n_epoch'] = 100
 cfg['max_es_cnt'] = 10
-cfg['hard_negative_start_epoch'] = 20
+cfg['hard_negative_start_epoch'] = 5
 cfg['hard_pool_size'] = 20
 cfg['use_hard_negative'] = True
+cfg['hard_negative_lr_scale'] = 0.7
+cfg['hard_negative_lr_drop_once'] = True
 cfg['loss_factor'] = [0.02, 0.04, 0.015, 0.03]
-cfg['neg_factor'] = [0.2, 32, 1.0]
+cfg['neg_factor'] = [0.2, 32, 1]
 cfg['hier_parent_pow'] = 2
 cfg['debug_hier_loss'] = True
 cfg['debug_hier_loss_every'] = 20
@@ -83,7 +85,7 @@ cfg['n_heads'] = 4
 cfg['input_drop'] = 0.2
 cfg['drop'] = 0.2
 cfg['initializer_range'] = 0.02
-cfg['segment_batch_size'] = 16
+cfg['segment_batch_size'] = 32
 cfg['segment_merge_ratio'] = 0.85
 cfg['segment_merge_target'] = 32
 cfg['context_encoder_type'] = 'gmm'
@@ -197,6 +199,14 @@ def _apply_env_overrides(cfg):
     hard_pool_size = _env_scalar('GMMFORMER_HARD_POOL_SIZE', float)
     if hard_pool_size is not None:
         cfg['hard_pool_size'] = int(hard_pool_size)
+
+    hard_negative_lr_scale = _env_scalar('GMMFORMER_HARD_NEG_LR_SCALE', float)
+    if hard_negative_lr_scale is not None:
+        cfg['hard_negative_lr_scale'] = hard_negative_lr_scale
+
+    hard_negative_lr_drop_once = _env_bool('GMMFORMER_HARD_NEG_LR_DROP_ONCE')
+    if hard_negative_lr_drop_once is not None:
+        cfg['hard_negative_lr_drop_once'] = hard_negative_lr_drop_once
 
     loss_factor = _env_list('GMMFORMER_LOSS_FACTOR', cast=float)
     if loss_factor:
