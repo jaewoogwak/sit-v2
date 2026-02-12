@@ -72,6 +72,9 @@ cfg['hier_cross_topk'] = 16
 cfg['hier_cross_w'] = 0.1
 cfg['hier_cross_margin'] = 0.05
 cfg['hier_cross_start_epoch'] = 5
+cfg['hier_ts_soft_neg'] = True
+cfg['hier_ts_soft_neg_beta'] = 0.7
+cfg['hier_ts_soft_neg_min_w'] = 0.2
 cfg['debug_hier_loss'] = True
 cfg['debug_hier_loss_every'] = 20
 

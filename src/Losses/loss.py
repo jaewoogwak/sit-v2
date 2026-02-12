@@ -103,7 +103,12 @@ class loss(nn.Module):
             segment_bounds_mask = batch.get('segment_bounds_mask')
             if segment_bounds is not None:
                 hier_loss, hier_stats = self.get_segment_hierarchy_loss(
-                    encoded_clip_feat, clip_mask, segment_bounds, segment_bounds_mask
+                    encoded_clip_feat,
+                    clip_mask,
+                    segment_bounds,
+                    segment_bounds_mask,
+                    labels=query_labels,
+                    batch=batch,
                 )
                 self._last_hier_stats = hier_stats
                 hier_term = hier_w * hier_loss
@@ -235,7 +240,15 @@ class loss(nn.Module):
 
         return infonce_w * infonce_loss + div_w * div_loss
 
-    def get_segment_hierarchy_loss(self, encoded_clip_feat, clip_mask, segment_bounds, segment_bounds_mask=None):
+    def get_segment_hierarchy_loss(
+        self,
+        encoded_clip_feat,
+        clip_mask,
+        segment_bounds,
+        segment_bounds_mask=None,
+        labels=None,
+        batch=None,
+    ):
         """
         Parent-attract / sibling-repel loss within the same parent.
         encoded_clip_feat: (Nv, S, D)
@@ -278,6 +291,16 @@ class loss(nn.Module):
             and cross_topk > 0
             and cur_epoch >= cross_start_epoch
         )
+        use_ts_soft_neg = bool(self.cfg.get('hier_ts_soft_neg', False))
+        ts_soft_beta = float(self.cfg.get('hier_ts_soft_neg_beta', 0.7))
+        ts_soft_min_w = float(self.cfg.get('hier_ts_soft_neg_min_w', 0.2))
+        ts_soft_min_w = max(0.0, min(1.0, ts_soft_min_w))
+        ts_soft_enabled = (
+            use_ts_soft_neg
+            and labels is not None
+            and isinstance(batch, dict)
+            and 'text_ts' in batch
+        )
 
         all_feats = None
         all_vid_ids = None
@@ -296,7 +319,18 @@ class loss(nn.Module):
         skipped_no_sibling = 0
         cross_count = 0
         skipped_no_cross = 0
+        ts_soft_count = 0
         eps = self._hier_eps
+
+        text_ts = None
+        text_ts_mask = None
+        if ts_soft_enabled:
+            text_ts = batch['text_ts'].to(encoded_clip_feat.device)
+            text_ts_mask = batch.get('text_ts_mask', None)
+            if text_ts_mask is None:
+                text_ts_mask = torch.ones(text_ts.shape[0], device=text_ts.device, dtype=torch.float32)
+            else:
+                text_ts_mask = text_ts_mask.to(encoded_clip_feat.device)
 
         for v in range(encoded_clip_feat.size(0)):
             vmask = valid_mask[v]
@@ -313,6 +347,21 @@ class loss(nn.Module):
             s = bounds[:, 0]
             e = bounds[:, 1]
             seg_len = torch.clamp(e - s, min=eps)
+            ts_rel = None
+            if ts_soft_enabled:
+                q_indices = [
+                    qi for qi, vid_idx in enumerate(labels)
+                    if qi < text_ts.size(0) and int(vid_idx) == v and float(text_ts_mask[qi].item()) > 0
+                ]
+                if q_indices:
+                    q_ts = text_ts[torch.tensor(q_indices, device=text_ts.device, dtype=torch.long)]
+                    ts_start = q_ts[:, 0].unsqueeze(1)
+                    ts_end = q_ts[:, 1].unsqueeze(1)
+                    seg_start = s.unsqueeze(0)
+                    seg_end = e.unsqueeze(0)
+                    inter = torch.clamp(torch.min(seg_end, ts_end) - torch.max(seg_start, ts_start), min=0.0)
+                    ov = inter / seg_len.unsqueeze(0)
+                    ts_rel = ov.max(dim=0).values.clamp(min=0.0, max=1.0)
 
             s_j = s[:, None]
             e_j = e[:, None]
@@ -351,7 +400,14 @@ class loss(nn.Module):
                     skipped_no_sibling += 1
                     continue
                 neg_scores = sim[i, sib_mask]
-                loss_i = F.relu(margin + neg_scores - pos).mean()
+                neg_term = F.relu(margin + neg_scores - pos)
+                if ts_rel is not None:
+                    ri = ts_rel[i]
+                    rj = ts_rel[sib_mask]
+                    soft_w = (1.0 - ts_soft_beta * torch.min(ri, rj)).clamp(min=ts_soft_min_w, max=1.0)
+                    neg_term = neg_term * soft_w
+                    ts_soft_count += 1
+                loss_i = neg_term.mean()
 
                 if cross_enabled:
                     cross_mask = all_vid_ids != v
@@ -385,6 +441,8 @@ class loss(nn.Module):
             stats["skipped_no_cross"] = int(skipped_no_cross)
         else:
             stats["cross_enabled"] = False
+        stats["ts_soft_enabled"] = bool(ts_soft_enabled)
+        stats["ts_soft_count"] = int(ts_soft_count)
         if count == 0:
             stats["loss"] = 0.0
             return total, stats
