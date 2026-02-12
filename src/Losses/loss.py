@@ -344,6 +344,17 @@ class loss(nn.Module):
                         rel_v = overlap.max(dim=0).values.clamp(0.0, 1.0)
                     video_rel[v] = rel_v
 
+        cross_feature_bank = [None for _ in range(num_videos)]
+        if cross_enabled and cross_topk > 0 and cross_w > 0:
+            for v in range(num_videos):
+                others = []
+                for ov in range(num_videos):
+                    if ov == v or video_feats[ov] is None:
+                        continue
+                    others.append(video_feats[ov])
+                if others:
+                    cross_feature_bank[v] = torch.cat(others, dim=0)
+
         for v in range(num_videos):
             feats = video_feats[v]
             bounds = video_bounds[v]
@@ -368,6 +379,15 @@ class loss(nn.Module):
             proper = (len_j > len_i) | equal_bounds
             parent = contains & proper
             parent.fill_diagonal_(False)
+
+            cross_topk_rows = None
+            if cross_enabled and cross_topk > 0 and cross_w > 0:
+                cross_feats = cross_feature_bank[v]
+                if cross_feats is not None and cross_feats.numel() > 0:
+                    cross_sim = torch.matmul(feats, cross_feats.t())
+                    k = min(cross_topk, int(cross_sim.size(1)))
+                    if k > 0:
+                        cross_topk_rows = torch.topk(cross_sim, k=k, dim=1, largest=True).values
 
             n = sim.size(0)
             for i in range(n):
@@ -407,23 +427,12 @@ class loss(nn.Module):
                     has_loss_term = True
 
                 if cross_enabled and cross_topk > 0 and cross_w > 0:
-                    cross_scores = []
-                    anchor_feat = feats[i]
-                    for ov in range(num_videos):
-                        if ov == v or video_feats[ov] is None:
-                            continue
-                        cross_scores.append(torch.matmul(video_feats[ov], anchor_feat))
-                    if cross_scores:
-                        cross_scores = torch.cat(cross_scores, dim=0)
-                        if cross_scores.numel() > 0:
-                            k = min(cross_topk, int(cross_scores.numel()))
-                            topk_scores = torch.topk(cross_scores, k=k, largest=True).values
-                            cross_loss = F.relu(cross_margin + topk_scores - pos).mean()
-                            anchor_loss = anchor_loss + (cross_w * cross_loss)
-                            cross_count += 1
-                            has_loss_term = True
-                        else:
-                            skipped_no_cross += 1
+                    if cross_topk_rows is not None:
+                        topk_scores = cross_topk_rows[i]
+                        cross_loss = F.relu(cross_margin + topk_scores - pos).mean()
+                        anchor_loss = anchor_loss + (cross_w * cross_loss)
+                        cross_count += 1
+                        has_loss_term = True
                     else:
                         skipped_no_cross += 1
 
