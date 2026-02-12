@@ -5,8 +5,8 @@ import yaml
 cfg = {}
 
 # identity + paths
-cfg['model_name'] = 'SiT-act-frames-gmm-softmil-c7-f3-level-complete-new-seg-hier'
-cfg['dataset_name'] = 'act_frames'
+cfg['model_name'] = 'SiT-cha-frames-gmm-softmil-c7-f3-level-complete'
+cfg['dataset_name'] = 'cha_frames'
 cfg['seed'] = 9527
 cfg['root'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2'
 cfg['data_root'] = '/dev/ssd1/gjw/prvr/dataset'
@@ -15,26 +15,21 @@ cfg['data_root'] = '/dev/ssd1/gjw/prvr/dataset'
 cfg['visual_feature'] = 'act_frames'
 cfg['text_feature'] = 'clip'
 # optional override; if non-empty, builder uses this path directly
-cfg['text_feat_path'] = ''
-cfg['text_feat_path'] = ''
+cfg['text_feat_path'] = '/dev/ssd1/gjw/prvr/dataset/charades/TextData/clip_ViT_B_32_charades_query_feat.hdf5'
 # optional token mask hdf5 (key-aligned with text_feat_path). keep empty for legacy behavior.
 cfg['text_mask_path'] = ''
-cfg['text_mask_path'] = ''
-cfg['collection'] = 'activitynet'
+cfg['collection'] = 'charades'
 cfg['map_size'] = 32
 cfg['clip_scale_w'] = 0.7
 cfg['frame_scale_w'] = 0.3
-cfg['clip_pooling'] = 'topk_soft'
-cfg['clip_topk'] = 3
-cfg['clip_topk_temp'] = 0.07
 # boundaries + segmenting
-cfg['frame_feature_dir'] = '/dev/hdd2/gjw/datasets/activitynet/features'
-cfg['boundary_train_path'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/output/boundaries_act_train.json'
-cfg['boundary_val_path'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/output/boundaries_act_val.json'
+cfg['frame_feature_dir'] = '/dev/hdd2/gjw/datasets/charades/features'
+cfg['boundary_train_path'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2/output/boundaries_cha_train.json'
+cfg['boundary_val_path'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2/output/boundaries_cha_val.json'
 cfg['boundary_level'] = 'fine+levels'
 cfg['use_last_level_as_frame'] = False
 cfg['dedupe_segments'] = False
-cfg['video2frames_path'] = '/dev/ssd1/gjw/prvr/dataset/activitynet/FeatureData/i3d/video2frames.txt'
+cfg['video2frames_path'] = '/dev/ssd1/gjw/prvr/dataset/charades/FeatureData/i3d/video2frames.txt'
 
 cfg['model_root'] = os.path.join(cfg['root'], 'results', cfg['dataset_name'], cfg['model_name'])
 cfg['ckpt_path'] = os.path.join(cfg['model_root'], 'ckpt')
@@ -59,19 +54,12 @@ cfg['margin'] = 0.1
 # train
 cfg['n_epoch'] = 100
 cfg['max_es_cnt'] = 10
-cfg['hard_negative_start_epoch'] = 17
+cfg['hard_negative_start_epoch'] = 5
 cfg['hard_pool_size'] = 20
 cfg['use_hard_negative'] = True
-cfg['hard_negative_lr_scale'] = 0.7
-cfg['hard_negative_lr_drop_once'] = True
 cfg['loss_factor'] = [0.02, 0.04, 0.015, 0.03]
 cfg['neg_factor'] = [0.2, 32]
-cfg['hier_parent_pow'] = 1
-cfg['hier_cross_video_neg'] = False
-cfg['hier_cross_topk'] = 16
-cfg['hier_cross_w'] = 0.1
-cfg['hier_cross_margin'] = 0.05
-cfg['hier_cross_start_epoch'] = 5
+cfg['hier_parent_pow'] = 2
 cfg['debug_hier_loss'] = True
 cfg['debug_hier_loss_every'] = 20
 
@@ -79,8 +67,6 @@ cfg['debug_hier_loss_every'] = 20
 # eval
 cfg['eval_query_bsz'] = 50
 cfg['eval_context_bsz'] = 100
-cfg['eval_debug_slot_sim'] = False
-cfg['eval_debug_slot_topk'] = 5
 
 
 # model
@@ -95,7 +81,7 @@ cfg['n_heads'] = 4
 cfg['input_drop'] = 0.2
 cfg['drop'] = 0.2
 cfg['initializer_range'] = 0.02
-cfg['segment_batch_size'] = 32
+cfg['segment_batch_size'] = 256
 cfg['segment_merge_ratio'] = 0.85
 cfg['segment_merge_target'] = 32
 cfg['context_encoder_type'] = 'gmm'
@@ -110,12 +96,12 @@ cfg['seg_token_proj'] = True
 cfg['seg_token_bertattn_layers'] = 2
 cfg['seg_slot_temp'] = 0.07
 cfg['seg_slot_dropout'] = 0.1
-cfg['seg_diversity_weight'] = 0.8
+cfg['seg_diversity_weight'] = 0.2
 cfg['seg_diversity_type'] = 'cosine'
-cfg['seg_diversity_margin'] = 0.3
+cfg['seg_diversity_margin'] = 0.2
 cfg['seg_ts_overlap_thr'] = 0.5
 cfg['seg_infonce_temp'] = 0.07
-cfg['seg_infonce_weight'] = 1
+cfg['seg_infonce_weight'] = 0.15
 cfg['seg_infer_hard_topk'] = True
 cfg['seg_infer_topk'] = cfg['seg_token_K']
 cfg['seg_debug_mask_print'] = True
@@ -124,8 +110,8 @@ cfg['seg_debug_mask_max_print'] = 30
 
 # soft MIL (requires release paths)
 cfg['use_soft_mil'] = True
-cfg['release_train_path'] = '/dev/hdd2/gjw/datasets/activitynet/activitynet_train.jsonl'
-cfg['release_val_path'] = '/dev/hdd2/gjw/datasets/activitynet/activitynet_val.jsonl'
+cfg['release_train_path'] = '/dev/hdd2/gjw/datasets/charades/charades_train.jsonl'
+cfg['release_val_path'] = '/dev/hdd2/gjw/datasets/charades/charades_val.jsonl'
 cfg['soft_mil_sanity_max'] = 0
 
 
@@ -210,14 +196,6 @@ def _apply_env_overrides(cfg):
     if hard_pool_size is not None:
         cfg['hard_pool_size'] = int(hard_pool_size)
 
-    hard_negative_lr_scale = _env_scalar('GMMFORMER_HARD_NEG_LR_SCALE', float)
-    if hard_negative_lr_scale is not None:
-        cfg['hard_negative_lr_scale'] = hard_negative_lr_scale
-
-    hard_negative_lr_drop_once = _env_bool('GMMFORMER_HARD_NEG_LR_DROP_ONCE')
-    if hard_negative_lr_drop_once is not None:
-        cfg['hard_negative_lr_drop_once'] = hard_negative_lr_drop_once
-
     loss_factor = _env_list('GMMFORMER_LOSS_FACTOR', cast=float)
     if loss_factor:
         cfg['loss_factor'] = loss_factor
@@ -237,18 +215,6 @@ def _apply_env_overrides(cfg):
     frame_scale_w = _env_scalar('GMMFORMER_FRAME_SCALE_W', float)
     if frame_scale_w is not None:
         cfg['frame_scale_w'] = frame_scale_w
-
-    clip_pooling = os.getenv('GMMFORMER_CLIP_POOLING', '').strip().lower()
-    if clip_pooling:
-        cfg['clip_pooling'] = clip_pooling
-
-    clip_topk = _env_scalar('GMMFORMER_CLIP_TOPK', float)
-    if clip_topk is not None:
-        cfg['clip_topk'] = int(clip_topk)
-
-    clip_topk_temp = _env_scalar('GMMFORMER_CLIP_TOPK_TEMP', float)
-    if clip_topk_temp is not None:
-        cfg['clip_topk_temp'] = clip_topk_temp
 
     input_drop = _env_scalar('GMMFORMER_INPUT_DROP', float)
     if input_drop is not None:

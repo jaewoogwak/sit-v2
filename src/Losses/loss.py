@@ -266,12 +266,36 @@ class loss(nn.Module):
                 valid_mask = (clip_mask > 0) & (segment_bounds_mask > 0)
 
         margin = float(self.cfg.get('margin', 0.1))
+        cur_epoch = int(self.cfg.get('_current_epoch', 0))
+        use_cross_neg = bool(self.cfg.get('hier_cross_video_neg', False))
+        cross_w = float(self.cfg.get('hier_cross_w', 0.1))
+        cross_margin = float(self.cfg.get('hier_cross_margin', margin))
+        cross_topk = int(self.cfg.get('hier_cross_topk', 16))
+        cross_start_epoch = int(self.cfg.get('hier_cross_start_epoch', 0))
+        cross_enabled = (
+            use_cross_neg
+            and cross_w > 0.0
+            and cross_topk > 0
+            and cur_epoch >= cross_start_epoch
+        )
+
+        all_feats = None
+        all_vid_ids = None
+        if cross_enabled:
+            all_feats = F.normalize(encoded_clip_feat, dim=-1)[valid_mask]
+            vid_idx_grid = torch.arange(
+                encoded_clip_feat.size(0), device=encoded_clip_feat.device
+            ).unsqueeze(1).expand_as(valid_mask)
+            all_vid_ids = vid_idx_grid[valid_mask]
+
         total = encoded_clip_feat.new_zeros(())
         count = 0
         vids_used = 0
         anchors = 0
         skipped_no_parent = 0
         skipped_no_sibling = 0
+        cross_count = 0
+        skipped_no_cross = 0
         eps = self._hier_eps
 
         for v in range(encoded_clip_feat.size(0)):
@@ -313,7 +337,9 @@ class loss(nn.Module):
 
                 p_len = seg_len[parent_idx]
                 parent_pow = float(self.cfg.get('hier_parent_pow', 1.0))
-                w = 1.0 / torch.clamp(p_len, min=eps).pow(parent_pow)
+                # Weight by child/parent length ratio (larger child within parent -> stronger pull)
+                child_len = torch.clamp(seg_len[i], min=eps)
+                w = (child_len / torch.clamp(p_len, min=eps)).pow(parent_pow)
                 w = w / torch.clamp(w.sum(), min=eps)
                 pos = (sim[i, parent_idx] * w).sum()
 
@@ -326,6 +352,22 @@ class loss(nn.Module):
                     continue
                 neg_scores = sim[i, sib_mask]
                 loss_i = F.relu(margin + neg_scores - pos).mean()
+
+                if cross_enabled:
+                    cross_mask = all_vid_ids != v
+                    if cross_mask.any():
+                        cross_scores = torch.matmul(all_feats[cross_mask], feats[i])
+                        k = min(cross_topk, cross_scores.numel())
+                        if k > 0:
+                            hard_cross = torch.topk(cross_scores, k=k, largest=True).values
+                            cross_loss = F.relu(cross_margin + hard_cross - pos).mean()
+                            loss_i = loss_i + cross_w * cross_loss
+                            cross_count += 1
+                        else:
+                            skipped_no_cross += 1
+                    else:
+                        skipped_no_cross += 1
+
                 total = total + loss_i
                 count += 1
 
@@ -337,6 +379,12 @@ class loss(nn.Module):
             "skipped_no_parent": int(skipped_no_parent),
             "skipped_no_sibling": int(skipped_no_sibling),
         }
+        if cross_enabled:
+            stats["cross_enabled"] = True
+            stats["cross_count"] = int(cross_count)
+            stats["skipped_no_cross"] = int(skipped_no_cross)
+        else:
+            stats["cross_enabled"] = False
         if count == 0:
             stats["loss"] = 0.0
             return total, stats

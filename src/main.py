@@ -31,7 +31,7 @@ sys.path.insert(0, root_path)
 parser = argparse.ArgumentParser(description="Partially Relevant Video Retrieval")
 parser.add_argument(
     '-d', '--dataset_name', default='tvr', type=str, metavar='DATASET', help='dataset name', 
-    choices=['tvr', 'act', 'cha', 'tvr_clip', 'tvr_frames', 'act_frames', 'tvr_internvideo', 'act_clip', 'tvr_hd', 'msrvtt', 'webvid', 'webvid_dummy', 'webvid_dummy_18', 'webvid-10m', 'webvid_10m', 'webvid10m']
+    choices=['tvr', 'act', 'cha', 'cha_frames', 'tvr_clip', 'tvr_frames', 'act_frames', 'tvr_internvideo', 'act_clip', 'tvr_hd', 'msrvtt', 'webvid', 'webvid_dummy', 'webvid_dummy_18', 'webvid-10m', 'webvid_10m', 'webvid10m']
 )
 parser.add_argument(
     '--gpu', default = '0', type = str, help = 'specify gpu device'
@@ -99,6 +99,7 @@ def train_one_epoch(epoch, train_loader, model, criterion, cfg, optimizer):
         criterion.cfg['use_hard_negative'] = True
     else:
         criterion.cfg['use_hard_negative'] = False
+    criterion.cfg['_current_epoch'] = int(epoch)
 
     # Drop base LR once at hard-negative start epoch, then keep scheduler behavior unchanged.
     hard_neg_lr_scale = float(cfg.get('hard_negative_lr_scale', 1.0) or 1.0)

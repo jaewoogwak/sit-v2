@@ -1,0 +1,65 @@
+[run.sh] Log file: /dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/logs/run_20260212_013647.log
+[run.sh] H5 not found. Building from NPY: ./output/charades_frame_embeds.h5
+[build_h5_from_npy] total_vids=6672 written=6672 missing=0
+[run.sh] Merged train/val JSONL: ./output/charades_trainval_merged.jsonl
+[run.sh] Inference JSONLs: /dev/hdd2/gjw/datasets/charades/charades_train.jsonl,/dev/hdd2/gjw/datasets/charades/charades_val.jsonl
+[run.sh] Inference outputs: ./output/boundaries_cha_train.json,./output/boundaries_cha_val.json
+[run.sh] Coarse mode: peaks (sim_threshold=0.65)
+[run.sh] Fine params: seq_len=3 feature_dim=512 batch_size=128 lr=1e-4 epochs=20 layers=2 heads=8 ff_dim=20248 use_local_max=0 alpha=3 threshold_std=1.0 segment_pooling=self_attn
+[run.sh] Level params: seq_len=3 batch_size=128 lr=1e-4 epochs=20 layers=2 heads=8 ff_dim=2048 use_local_max=0 alpha=2 threshold_std=0 threshold_mode=mad ckpt_dir=./checkpoints/level
+[run.sh] Recursive params: levels=5 until_one=1 seq_len=3 seq_len_list= alpha=2 alpha_list= a=0 a_list= checkpoint= use_local_max=0
+[run.sh] Mode: fine+recursive+coarse
+epoch 1 loss 0.061627 time 5.84s
+epoch 2 loss 0.032906 time 5.63s
+epoch 3 loss 0.027815 time 5.71s
+epoch 4 loss 0.025233 time 5.72s
+epoch 5 loss 0.023324 time 5.65s
+epoch 6 loss 0.021704 time 5.65s
+epoch 7 loss 0.020317 time 5.64s
+epoch 8 loss 0.019029 time 5.65s
+epoch 9 loss 0.017743 time 5.64s
+epoch 10 loss 0.016521 time 5.67s
+epoch 11 loss 0.015343 time 5.66s
+epoch 12 loss 0.014063 time 5.69s
+epoch 13 loss 0.013025 time 5.64s
+epoch 14 loss 0.012116 time 5.68s
+epoch 15 loss 0.011338 time 5.70s
+epoch 16 loss 0.010396 time 5.67s
+epoch 17 loss 0.009778 time 5.64s
+epoch 18 loss 0.009170 time 5.65s
+epoch 19 loss 0.008623 time 5.65s
+epoch 20 loss 0.008054 time 5.66s
+[run.sh] Coarse trainval segment H5: ./output/segments_trainval.h5
+[run.sh] Coarse trainval boundaries: ./output/boundaries_trainval_fine.json
+/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/inference_boundary.py:375: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(args.checkpoint, map_location=device)
+epoch 1 loss 0.224895 time 2.79s
+epoch 2 loss 0.175574 time 2.60s
+epoch 3 loss 0.159745 time 2.60s
+epoch 4 loss 0.148508 time 2.59s
+epoch 5 loss 0.140160 time 2.59s
+epoch 6 loss 0.132314 time 2.58s
+epoch 7 loss 0.123645 time 2.60s
+epoch 8 loss 0.114995 time 2.60s
+epoch 9 loss 0.107749 time 2.65s
+epoch 10 loss 0.100799 time 2.59s
+epoch 11 loss 0.094783 time 2.59s
+epoch 12 loss 0.089040 time 2.60s
+epoch 13 loss 0.084982 time 2.59s
+epoch 14 loss 0.080677 time 2.61s
+epoch 15 loss 0.079299 time 2.70s
+epoch 16 loss 0.076762 time 2.60s
+epoch 17 loss 0.072705 time 2.59s
+epoch 18 loss 0.070968 time 2.58s
+epoch 19 loss 0.069335 time 2.59s
+epoch 20 loss 0.069743 time 2.60s
+/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/inference_boundary.py:375: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(args.checkpoint, map_location=device)
+/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/inference_boundary.py:389: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  coarse_ckpt = torch.load(args.coarse_checkpoint, map_location=device)
+/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/inference_boundary.py:375: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(args.checkpoint, map_location=device)
+/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/inference_boundary.py:389: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  coarse_ckpt = torch.load(args.coarse_checkpoint, map_location=device)
+/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/inference_boundary.py:401: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  recursive_ckpt = torch.load(args.recursive_checkpoint, map_location=device)

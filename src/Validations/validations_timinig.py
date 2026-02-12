@@ -753,6 +753,9 @@ class validations(nn.Module):
             print(f"video_rank: {gt_rank} / {scores_row.numel()}")
             print("top_videos:")
             seg_bounds_cache = {}
+            fine_idx_cache = {}
+            level_idx_cache = {}
+            top_video_segments_json = []
 
             def _get_seg_bounds_for_vid(vid):
                 if vid in seg_bounds_cache:
@@ -774,9 +777,54 @@ class validations(nn.Module):
                 seg_bounds_cache[vid] = bounds
                 return bounds
 
+            def _get_fine_indices_for_vid(vid):
+                if vid in fine_idx_cache:
+                    return fine_idx_cache[vid]
+                if not isinstance(boundaries, dict) or not callable(loader):
+                    fine_idx_cache[vid] = []
+                    return fine_idx_cache[vid]
+                try:
+                    frames = loader(vid)
+                    n_frames = int(frames.shape[0])
+                except Exception:
+                    fine_idx_cache[vid] = []
+                    return fine_idx_cache[vid]
+                entry = boundaries.get(vid, {})
+                all_bounds = _compute_segment_bounds(entry, n_frames, boundary_level, dedupe_segments)
+                fine_bounds = _compute_segment_bounds(entry, n_frames, "fine", dedupe_segments)
+                all_tuples = [tuple(map(int, b)) for b in all_bounds]
+                fine_set = {tuple(map(int, b)) for b in fine_bounds}
+                fine_indices = [i for i, b in enumerate(all_tuples) if b in fine_set]
+                fine_idx_cache[vid] = fine_indices
+                return fine_indices
+
+            def _get_level_indices_for_vid(vid):
+                if vid in level_idx_cache:
+                    return level_idx_cache[vid]
+                if not isinstance(boundaries, dict) or not callable(loader):
+                    level_idx_cache[vid] = []
+                    return level_idx_cache[vid]
+                try:
+                    frames = loader(vid)
+                    n_frames = int(frames.shape[0])
+                except Exception:
+                    level_idx_cache[vid] = []
+                    return level_idx_cache[vid]
+                entry = boundaries.get(vid, {})
+                all_bounds = _compute_segment_bounds(entry, n_frames, boundary_level, dedupe_segments)
+                fine_bounds = _compute_segment_bounds(entry, n_frames, "fine", dedupe_segments)
+                all_tuples = [tuple(map(int, b)) for b in all_bounds]
+                fine_set = {tuple(map(int, b)) for b in fine_bounds}
+                level_indices = [i for i, b in enumerate(all_tuples) if b not in fine_set]
+                level_idx_cache[vid] = level_indices
+                return level_indices
+
             for r, (v_idx, v_score) in enumerate(zip(top_idxs.tolist(), top_vals.tolist()), start=1):
                 vid_name = video_metas[v_idx] if v_idx < len(video_metas) else str(v_idx)
                 seg_idx = None
+                top_seg_entries = []
+                fine_top_seg_entries = []
+                level_top_seg_entries = []
                 if video_query is not None:
                     ctx_feat = context_info["video_proposal_feat"][v_idx]
                     if not bool(self.cfg.get("pre_normalize_context", False)):
@@ -786,6 +834,67 @@ class validations(nn.Module):
                         seg_scores = seg_scores.masked_fill(clip_mask[v_idx] == 0, -1e10)
                     if seg_scores.numel():
                         seg_idx = int(torch.argmax(seg_scores).item())
+                        local_sk = min(seg_topk, seg_scores.numel())
+                        seg_vals_k, seg_idxs_k = torch.topk(seg_scores, k=local_sk, largest=True)
+                        bounds = _get_seg_bounds_for_vid(vid_name)
+                        for s_idx, s_score in zip(seg_idxs_k.tolist(), seg_vals_k.tolist()):
+                            seg_item = {
+                                "segment_idx": int(s_idx),
+                                "score": float(s_score),
+                            }
+                            if bounds and 0 <= s_idx < len(bounds):
+                                s, e = bounds[s_idx]
+                                seg_item["bounds"] = [int(s), int(e)]
+                                seg_item["ts_3fps"] = [float(s) / 3.0, float(e) / 3.0]
+                            top_seg_entries.append(seg_item)
+                        fine_indices = _get_fine_indices_for_vid(vid_name)
+                        if fine_indices:
+                            fine_idx_tensor = torch.as_tensor(
+                                fine_indices, device=seg_scores.device, dtype=torch.long
+                            )
+                            fine_scores = seg_scores.index_select(0, fine_idx_tensor)
+                            fine_sk = min(seg_topk, fine_scores.numel())
+                            fine_vals_k, fine_local_idxs_k = torch.topk(
+                                fine_scores, k=fine_sk, largest=True
+                            )
+                            bounds = _get_seg_bounds_for_vid(vid_name)
+                            for local_i, s_score in zip(
+                                fine_local_idxs_k.tolist(), fine_vals_k.tolist()
+                            ):
+                                s_idx = int(fine_indices[int(local_i)])
+                                seg_item = {
+                                    "segment_idx": s_idx,
+                                    "score": float(s_score),
+                                }
+                                if bounds and 0 <= s_idx < len(bounds):
+                                    s, e = bounds[s_idx]
+                                    seg_item["bounds"] = [int(s), int(e)]
+                                    seg_item["ts_3fps"] = [float(s) / 3.0, float(e) / 3.0]
+                                fine_top_seg_entries.append(seg_item)
+                        level_indices = _get_level_indices_for_vid(vid_name)
+                        if level_indices:
+                            level_idx_tensor = torch.as_tensor(
+                                level_indices, device=seg_scores.device, dtype=torch.long
+                            )
+                            level_scores = seg_scores.index_select(0, level_idx_tensor)
+                            level_sk = min(seg_topk, level_scores.numel())
+                            level_vals_k, level_local_idxs_k = torch.topk(
+                                level_scores, k=level_sk, largest=True
+                            )
+                            bounds = _get_seg_bounds_for_vid(vid_name)
+                            for local_i, s_score in zip(
+                                level_local_idxs_k.tolist(), level_vals_k.tolist()
+                            ):
+                                s_idx = int(level_indices[int(local_i)])
+                                seg_item = {
+                                    "segment_idx": s_idx,
+                                    "score": float(s_score),
+                                }
+                                if bounds and 0 <= s_idx < len(bounds):
+                                    s, e = bounds[s_idx]
+                                    seg_item["bounds"] = [int(s), int(e)]
+                                    seg_item["ts_3fps"] = [float(s) / 3.0, float(e) / 3.0]
+                                level_top_seg_entries.append(seg_item)
                 seg_bounds_info = ""
                 if seg_idx is not None:
                     bounds = _get_seg_bounds_for_vid(vid_name)
@@ -810,6 +919,58 @@ class validations(nn.Module):
                 else:
                     seg_info = f" segment={seg_idx}{seg_bounds_info}" if seg_idx is not None else ""
                     print(f"  {r:2d}. {vid_name} score={v_score:.4f}{seg_info}")
+                if top_seg_entries:
+                    seg_str_parts = []
+                    for item in top_seg_entries:
+                        if "bounds" in item:
+                            b0, b1 = item["bounds"]
+                            seg_str_parts.append(
+                                f"{item['segment_idx']}:{item['score']:.4f}[{b0},{b1}]"
+                            )
+                        else:
+                            seg_str_parts.append(f"{item['segment_idx']}:{item['score']:.4f}")
+                    print(f"      top_segments@video: {', '.join(seg_str_parts)}")
+                if fine_top_seg_entries:
+                    fine_seg_str_parts = []
+                    for item in fine_top_seg_entries:
+                        if "bounds" in item:
+                            b0, b1 = item["bounds"]
+                            fine_seg_str_parts.append(
+                                f"{item['segment_idx']}:{item['score']:.4f}[{b0},{b1}]"
+                            )
+                        else:
+                            fine_seg_str_parts.append(
+                                f"{item['segment_idx']}:{item['score']:.4f}"
+                            )
+                    print(
+                        f"      fine_only_top_segments@video: {', '.join(fine_seg_str_parts)}"
+                    )
+                if level_top_seg_entries:
+                    level_seg_str_parts = []
+                    for item in level_top_seg_entries:
+                        if "bounds" in item:
+                            b0, b1 = item["bounds"]
+                            level_seg_str_parts.append(
+                                f"{item['segment_idx']}:{item['score']:.4f}[{b0},{b1}]"
+                            )
+                        else:
+                            level_seg_str_parts.append(
+                                f"{item['segment_idx']}:{item['score']:.4f}"
+                            )
+                    print(
+                        f"      level_only_top_segments@video: {', '.join(level_seg_str_parts)}"
+                    )
+                top_video_segments_json.append(
+                    {
+                        "rank": int(r),
+                        "video_id": vid_name,
+                        "score": float(v_score),
+                        "segment_idx_argmax": None if seg_idx is None else int(seg_idx),
+                        "top_segments": top_seg_entries,
+                        "top_segments_fine_only": fine_top_seg_entries,
+                        "top_segments_level_only": level_top_seg_entries,
+                    }
+                )
 
             seg_scores_list = []
             slot_seg_sims_list = None
@@ -937,8 +1098,7 @@ class validations(nn.Module):
                 "segment_scores_count": seg_scores_count,
                 "segment_bounds_count": bounds_count,
                 "segment_bounds_mismatch": bool(bounds_count and seg_scores_list and bounds_count != len(seg_scores_list)),
-                "slot_segment_sims": slot_seg_sims_list,
-                "slot_segment_scores": slot_seg_scores_list,
+                "top_videos_segment_topk": top_video_segments_json,
             }
             debug_json["gt_queries"].append(query_json)
 

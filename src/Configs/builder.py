@@ -14,6 +14,9 @@ def get_configs(dataset_name):
     elif dataset_name in ['act_frames']:
         import Configs.act_frames as act_frames
         return act_frames.get_cfg_defaults()
+    elif dataset_name in ['cha_frames']:
+        import Configs.cha_frames as cha_frames
+        return cha_frames.get_cfg_defaults()
     elif dataset_name in ['tvr_internvideo']:
         import Configs.tvr_internvideo as tvr_internvideo
         return tvr_internvideo.get_cfg_defaults()

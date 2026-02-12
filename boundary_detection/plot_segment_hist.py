@@ -78,8 +78,8 @@ def main():
         "--dataset",
         type=str,
         default="act_frames",
-        choices=("act_frames", "tvr_frames"),
-        help="Dataset config name (maps to boundaries_{act,tvr}_{train,val}.json)",
+        choices=("act_frames", "tvr_frames", "cha_frames"),
+        help="Dataset config name (maps to boundaries_{act,tvr,cha}_{train,val}.json)",
     )
     parser.add_argument(
         "--boundaries-dir",
@@ -100,7 +100,12 @@ def main():
     )
     args = parser.parse_args()
 
-    dataset_key = "act" if args.dataset == "act_frames" else "tvr"
+    dataset_key_map = {
+        "act_frames": "act",
+        "tvr_frames": "tvr",
+        "cha_frames": "cha",
+    }
+    dataset_key = dataset_key_map[args.dataset]
     train_path = args.boundaries_dir / f"boundaries_{dataset_key}_train.json"
     val_path = args.boundaries_dir / f"boundaries_{dataset_key}_val.json"
 
