@@ -101,7 +101,7 @@ class loss(nn.Module):
             segment_bounds_mask = batch.get('segment_bounds_mask')
             if segment_bounds is not None:
                 hier_loss, hier_stats = self.get_segment_hierarchy_loss(
-                    encoded_clip_feat, clip_mask, segment_bounds, segment_bounds_mask
+                    encoded_clip_feat, clip_mask, segment_bounds, segment_bounds_mask, batch=batch
                 )
                 self._last_hier_stats = hier_stats
                 hier_term = hier_w * hier_loss
@@ -233,7 +233,7 @@ class loss(nn.Module):
 
         return infonce_w * infonce_loss + div_w * div_loss
 
-    def get_segment_hierarchy_loss(self, encoded_clip_feat, clip_mask, segment_bounds, segment_bounds_mask=None):
+    def get_segment_hierarchy_loss(self, encoded_clip_feat, clip_mask, segment_bounds, segment_bounds_mask=None, batch=None):
         """
         Parent-attract / sibling-repel loss within the same parent.
         encoded_clip_feat: (Nv, S, D)
@@ -264,29 +264,97 @@ class loss(nn.Module):
                 valid_mask = (clip_mask > 0) & (segment_bounds_mask > 0)
 
         margin = float(self.cfg.get('margin', 0.1))
+        parent_pow = float(self.cfg.get('hier_parent_pow', 1.0))
+        current_epoch = int(self.cfg.get('_current_epoch', -1))
+        cross_start_epoch = int(self.cfg.get('hier_cross_start_epoch', 0))
+        cross_enabled = bool(self.cfg.get('hier_cross_video_neg', False)) and (current_epoch >= cross_start_epoch)
+        cross_topk = int(self.cfg.get('hier_cross_topk', 16))
+        cross_margin = float(self.cfg.get('hier_cross_margin', 0.05))
+        cross_w = float(self.cfg.get('hier_cross_w', 0.1))
+        ts_soft_enabled = bool(self.cfg.get('hier_ts_soft_neg', False)) and isinstance(batch, dict) and ('text_ts' in batch)
+        ts_soft_beta = float(self.cfg.get('hier_ts_soft_neg_beta', 0.7))
+        ts_soft_min_w = float(self.cfg.get('hier_ts_soft_neg_min_w', 0.2))
         total = encoded_clip_feat.new_zeros(())
         count = 0
         vids_used = 0
         anchors = 0
         skipped_no_parent = 0
         skipped_no_sibling = 0
+        cross_count = 0
+        skipped_no_cross = 0
+        ts_soft_count = 0
         eps = self._hier_eps
+        num_videos = encoded_clip_feat.size(0)
 
-        for v in range(encoded_clip_feat.size(0)):
+        video_feats = []
+        video_bounds = []
+        video_seg_len = []
+        for v in range(num_videos):
             vmask = valid_mask[v]
-            if vmask.sum().item() < 2:
+            if vmask.sum().item() < 1:
+                video_feats.append(None)
+                video_bounds.append(None)
+                video_seg_len.append(None)
                 continue
-            feats = encoded_clip_feat[v][vmask]
-            bounds = segment_bounds[v][vmask]
-            if feats.numel() == 0 or bounds.numel() == 0:
+            feats_v = encoded_clip_feat[v][vmask]
+            bounds_v = segment_bounds[v][vmask]
+            if feats_v.numel() == 0 or bounds_v.numel() == 0:
+                video_feats.append(None)
+                video_bounds.append(None)
+                video_seg_len.append(None)
+                continue
+            feats_v = F.normalize(feats_v, dim=-1)
+            seg_len_v = torch.clamp(bounds_v[:, 1] - bounds_v[:, 0], min=eps)
+            video_feats.append(feats_v)
+            video_bounds.append(bounds_v)
+            video_seg_len.append(seg_len_v)
+
+        video_rel = [None for _ in range(num_videos)]
+        if ts_soft_enabled:
+            text_ts = batch['text_ts'].to(encoded_clip_feat.device)
+            text_labels = batch.get('text_labels', None)
+            text_ts_mask = batch.get('text_ts_mask', None)
+            if text_labels is None:
+                ts_soft_enabled = False
+            else:
+                if isinstance(text_labels, torch.Tensor):
+                    text_labels_t = text_labels.to(encoded_clip_feat.device, dtype=torch.long)
+                else:
+                    text_labels_t = torch.as_tensor(text_labels, device=encoded_clip_feat.device, dtype=torch.long)
+                if text_ts_mask is None:
+                    text_ts_mask_t = torch.ones(text_ts.size(0), device=encoded_clip_feat.device, dtype=torch.bool)
+                else:
+                    text_ts_mask_t = text_ts_mask.to(encoded_clip_feat.device) > 0
+
+                for v in range(num_videos):
+                    bounds_v = video_bounds[v]
+                    seg_len_v = video_seg_len[v]
+                    if bounds_v is None or seg_len_v is None:
+                        continue
+                    rel_v = torch.zeros(seg_len_v.size(0), device=encoded_clip_feat.device, dtype=encoded_clip_feat.dtype)
+                    qmask = (text_labels_t == v) & text_ts_mask_t
+                    if torch.any(qmask):
+                        q_ts = text_ts[qmask]
+                        q_start = q_ts[:, 0].unsqueeze(1)
+                        q_end = q_ts[:, 1].unsqueeze(1)
+                        seg_start = bounds_v[:, 0].unsqueeze(0)
+                        seg_end = bounds_v[:, 1].unsqueeze(0)
+                        inter = torch.clamp(torch.min(seg_end, q_end) - torch.max(seg_start, q_start), min=0.0)
+                        overlap = inter / seg_len_v.unsqueeze(0)
+                        rel_v = overlap.max(dim=0).values.clamp(0.0, 1.0)
+                    video_rel[v] = rel_v
+
+        for v in range(num_videos):
+            feats = video_feats[v]
+            bounds = video_bounds[v]
+            seg_len = video_seg_len[v]
+            if feats is None or bounds is None or seg_len is None or feats.size(0) < 2:
                 continue
             vids_used += 1
 
-            feats = F.normalize(feats, dim=-1)
             sim = torch.matmul(feats, feats.t())
             s = bounds[:, 0]
             e = bounds[:, 1]
-            seg_len = torch.clamp(e - s, min=eps)
 
             s_j = s[:, None]
             e_j = e[:, None]
@@ -310,22 +378,58 @@ class loss(nn.Module):
                     continue
 
                 p_len = seg_len[parent_idx]
-                parent_pow = float(self.cfg.get('hier_parent_pow', 1.0))
-                w = 1.0 / torch.clamp(p_len, min=eps).pow(parent_pow)
-                w = w / torch.clamp(w.sum(), min=eps)
-                pos = (sim[i, parent_idx] * w).sum()
+                child_len = seg_len[i]
+                ratio = torch.clamp(child_len / torch.clamp(p_len, min=eps), min=0.0, max=1.0)
+                w = ratio.pow(parent_pow)
+                pos = (sim[i, parent_idx] * w).mean()
+
+                anchor_loss = sim.new_zeros(())
+                has_loss_term = False
 
                 sib_mask = torch.zeros(n, device=sim.device, dtype=torch.bool)
                 for j in parent_idx.tolist():
                     sib_mask |= parent[j]
                 sib_mask[i] = False
-                if not sib_mask.any():
+                has_sibling = bool(sib_mask.any().item())
+                if not has_sibling:
                     skipped_no_sibling += 1
-                    continue
-                neg_scores = sim[i, sib_mask]
-                loss_i = F.relu(margin + neg_scores - pos).mean()
-                total = total + loss_i
-                count += 1
+                else:
+                    neg_scores = sim[i, sib_mask]
+                    neg_hinge = F.relu(margin + neg_scores - pos)
+                    if ts_soft_enabled and video_rel[v] is not None:
+                        rel_scores = video_rel[v][sib_mask].to(neg_hinge.dtype)
+                        neg_w = torch.clamp(1.0 - ts_soft_beta * rel_scores, min=ts_soft_min_w, max=1.0)
+                        loss_i = (neg_hinge * neg_w).sum() / torch.clamp(neg_w.sum(), min=eps)
+                        ts_soft_count += 1
+                    else:
+                        loss_i = neg_hinge.mean()
+                    anchor_loss = anchor_loss + loss_i
+                    has_loss_term = True
+
+                if cross_enabled and cross_topk > 0 and cross_w > 0:
+                    cross_scores = []
+                    anchor_feat = feats[i]
+                    for ov in range(num_videos):
+                        if ov == v or video_feats[ov] is None:
+                            continue
+                        cross_scores.append(torch.matmul(video_feats[ov], anchor_feat))
+                    if cross_scores:
+                        cross_scores = torch.cat(cross_scores, dim=0)
+                        if cross_scores.numel() > 0:
+                            k = min(cross_topk, int(cross_scores.numel()))
+                            topk_scores = torch.topk(cross_scores, k=k, largest=True).values
+                            cross_loss = F.relu(cross_margin + topk_scores - pos).mean()
+                            anchor_loss = anchor_loss + (cross_w * cross_loss)
+                            cross_count += 1
+                            has_loss_term = True
+                        else:
+                            skipped_no_cross += 1
+                    else:
+                        skipped_no_cross += 1
+
+                if has_loss_term:
+                    total = total + anchor_loss
+                    count += 1
 
         stats = {
             "enabled": True,
@@ -334,6 +438,11 @@ class loss(nn.Module):
             "anchors": int(anchors),
             "skipped_no_parent": int(skipped_no_parent),
             "skipped_no_sibling": int(skipped_no_sibling),
+            "cross_enabled": bool(cross_enabled),
+            "cross_count": int(cross_count),
+            "skipped_no_cross": int(skipped_no_cross),
+            "ts_soft_enabled": bool(ts_soft_enabled),
+            "ts_soft_count": int(ts_soft_count),
         }
         if count == 0:
             stats["loss"] = 0.0

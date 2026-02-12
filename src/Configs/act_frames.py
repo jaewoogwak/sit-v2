@@ -5,7 +5,7 @@ import yaml
 cfg = {}
 
 # identity + paths
-cfg['model_name'] = 'SiT-act-frames-gmm-softmil-c7-f3-level-complete-model'
+cfg['model_name'] = 'SiT-act-frames-gmm-softmil-c7-f3-level-complete-model-modified-seg-hier'
 cfg['dataset_name'] = 'act_frames'
 cfg['seed'] = 9527
 cfg['root'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2'
@@ -15,9 +15,9 @@ cfg['data_root'] = '/dev/ssd1/gjw/prvr/dataset'
 cfg['visual_feature'] = 'act_frames'
 cfg['text_feature'] = 'clip'
 # optional override; if non-empty, builder uses this path directly
-cfg['text_feat_path'] = '/dev/ssd1/gjw/prvr/dataset/activitynet/TextData/clip_ViT_B_32_activitynet_token_lnproj_withmask_v1.hdf5'
+cfg['text_feat_path'] = ''
 # optional token mask hdf5 (key-aligned with text_feat_path). keep empty for legacy behavior.
-cfg['text_mask_path'] = '/dev/ssd1/gjw/prvr/dataset/activitynet/TextData/clip_ViT_B_32_activitynet_token_mask_v1.hdf5'
+cfg['text_mask_path'] = ''
 cfg['collection'] = 'activitynet'
 cfg['map_size'] = 32
 cfg['clip_scale_w'] = 0.7
@@ -27,7 +27,7 @@ cfg['frame_feature_dir'] = '/dev/hdd2/gjw/datasets/activitynet/features'
 cfg['boundary_train_path'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/output/boundaries_act_train.json'
 cfg['boundary_val_path'] = '/dev/ssd1/gjw/prvr/semantic-transformer-v2/boundary_detection/output/boundaries_act_val.json'
 cfg['boundary_level'] = 'fine+levels'
-cfg['use_last_level_as_frame'] = True
+cfg['use_last_level_as_frame'] = False
 cfg['dedupe_segments'] = False
 cfg['video2frames_path'] = '/dev/ssd1/gjw/prvr/dataset/activitynet/FeatureData/i3d/video2frames.txt'
 
@@ -54,12 +54,20 @@ cfg['margin'] = 0.1
 # train
 cfg['n_epoch'] = 100
 cfg['max_es_cnt'] = 10
-cfg['hard_negative_start_epoch'] = 20
+cfg['hard_negative_start_epoch'] = 40
 cfg['hard_pool_size'] = 20
 cfg['use_hard_negative'] = True
 cfg['loss_factor'] = [0.02, 0.04, 0.015, 0.03]
 cfg['neg_factor'] = [0.2, 32]
-cfg['hier_parent_pow'] = 2
+cfg['hier_parent_pow'] = 1
+cfg['hier_cross_video_neg'] = True
+cfg['hier_cross_topk'] = 16
+cfg['hier_cross_w'] = 0.1
+cfg['hier_cross_margin'] = 0.05
+cfg['hier_cross_start_epoch'] = 5
+cfg['hier_ts_soft_neg'] = True
+cfg['hier_ts_soft_neg_beta'] = 0.7
+cfg['hier_ts_soft_neg_min_w'] = 0.2
 cfg['debug_hier_loss'] = True
 cfg['debug_hier_loss_every'] = 20
 
@@ -90,7 +98,7 @@ cfg['std_transformer_heads'] = 8
 cfg['std_transformer_ffn_dim'] = 2048
 
 # token decompostition
-cfg['use_seg_token_selector'] = True
+cfg['use_seg_token_selector'] = False
 cfg['seg_token_K'] = 8
 cfg['seg_token_proj'] = True
 cfg['seg_token_bertattn_layers'] = 2
@@ -207,6 +215,42 @@ def _apply_env_overrides(cfg):
     margin = _env_scalar('GMMFORMER_MARGIN', float)
     if margin is not None:
         cfg['margin'] = margin
+
+    hier_parent_pow = _env_scalar('GMMFORMER_HIER_PARENT_POW', float)
+    if hier_parent_pow is not None:
+        cfg['hier_parent_pow'] = hier_parent_pow
+
+    hier_cross_video_neg = _env_bool('GMMFORMER_HIER_CROSS_VIDEO_NEG')
+    if hier_cross_video_neg is not None:
+        cfg['hier_cross_video_neg'] = hier_cross_video_neg
+
+    hier_cross_topk = _env_scalar('GMMFORMER_HIER_CROSS_TOPK', float)
+    if hier_cross_topk is not None:
+        cfg['hier_cross_topk'] = int(hier_cross_topk)
+
+    hier_cross_w = _env_scalar('GMMFORMER_HIER_CROSS_W', float)
+    if hier_cross_w is not None:
+        cfg['hier_cross_w'] = hier_cross_w
+
+    hier_cross_margin = _env_scalar('GMMFORMER_HIER_CROSS_MARGIN', float)
+    if hier_cross_margin is not None:
+        cfg['hier_cross_margin'] = hier_cross_margin
+
+    hier_cross_start_epoch = _env_scalar('GMMFORMER_HIER_CROSS_START_EPOCH', float)
+    if hier_cross_start_epoch is not None:
+        cfg['hier_cross_start_epoch'] = int(hier_cross_start_epoch)
+
+    hier_ts_soft_neg = _env_bool('GMMFORMER_HIER_TS_SOFT_NEG')
+    if hier_ts_soft_neg is not None:
+        cfg['hier_ts_soft_neg'] = hier_ts_soft_neg
+
+    hier_ts_soft_neg_beta = _env_scalar('GMMFORMER_HIER_TS_SOFT_NEG_BETA', float)
+    if hier_ts_soft_neg_beta is not None:
+        cfg['hier_ts_soft_neg_beta'] = hier_ts_soft_neg_beta
+
+    hier_ts_soft_neg_min_w = _env_scalar('GMMFORMER_HIER_TS_SOFT_NEG_MIN_W', float)
+    if hier_ts_soft_neg_min_w is not None:
+        cfg['hier_ts_soft_neg_min_w'] = hier_ts_soft_neg_min_w
 
     clip_scale_w = _env_scalar('GMMFORMER_CLIP_SCALE_W', float)
     if clip_scale_w is not None:

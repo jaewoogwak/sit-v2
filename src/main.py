@@ -93,6 +93,8 @@ def _format_loss_terms(criterion):
 
 def train_one_epoch(epoch, train_loader, model, criterion, cfg, optimizer):
 
+    criterion.cfg['_current_epoch'] = int(epoch)
+
     if epoch >= cfg['hard_negative_start_epoch']:
         criterion.cfg['use_hard_negative'] = True
     else:
